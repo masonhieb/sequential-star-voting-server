@@ -435,6 +435,8 @@ class VotingServer:
         ).fetchone()
 
         if existing:
+            if existing["name_lower"] in self._sse_clients:
+                return web.json_response({"error": "That user is already signed in."}, status=409)
             return web.json_response(
                 {
                     "id":           existing["id"],
