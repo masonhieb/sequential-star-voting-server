@@ -82,8 +82,19 @@ class VotingServer:
                 and resp.content_type == "text/html"
                 and resp.text
             ):
+                # Inject <base> for HTML elements + patch fetch/EventSource for JS
+                patch = (
+                    f'<script>!function(){{'
+                    f'var p="{prefix}";'
+                    f'var f=window.fetch;'
+                    f'window.fetch=function(u,o){{return f(u&&u[0]==="/"?p+u:u,o);}};'
+                    f'var E=window.EventSource;'
+                    f'window.EventSource=function(u,o){{return new E(u&&u[0]==="/"?p+u:u,o);}};'
+                    f'window.EventSource.prototype=E.prototype;'
+                    f'}}();</script>'
+                )
                 body = resp.text.replace(
-                    "<head>", f'<head>\n  <base href="{prefix}/">', 1
+                    "<head>", f'<head>\n  <base href="{prefix}/">\n  {patch}', 1
                 )
                 return web.Response(
                     text=body,
@@ -170,7 +181,7 @@ class VotingServer:
                 "title": c["title"],
                 "body_html": render_markdown(c["body"]),
                 "author": c["author"],
-                "image_url": f"/images/{c['image_path']}" if c["image_path"] else None,
+                "image_url": f"images/{c['image_path']}" if c["image_path"] else None,
             }
             for c in eligible
         ]
@@ -417,7 +428,7 @@ class VotingServer:
                     "body": c["body"],
                     "body_html": render_markdown(c["body"]),
                     "author": c["author"],
-                    "image_url": f"/images/{c['image_path']}"
+                    "image_url": f"images/{c['image_path']}"
                     if c["image_path"]
                     else None,
                 }
@@ -939,7 +950,7 @@ class VotingServer:
 
         if not filename:
             return web.json_response({"error": "No image provided"}, status=400)
-        return web.json_response({"filename": filename, "url": f"/images/{filename}"})
+        return web.json_response({"filename": filename, "url": f"images/{filename}"})
 
     # ── Entry point ───────────────────────────────────────────────────────────
 

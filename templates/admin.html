@@ -575,6 +575,7 @@ async function loadHistory() {
     }
     el.innerHTML = elections.slice().reverse().map(e => {
       const modeLabel = e.voting_mode === 'score' ? 'Multi-winner score' : 'Sequential STAR';
+
       const resultsHtml = e.results.map(res => {
         let detail = `<span style="color:var(--muted);font-size:.8rem">Score: ${res.total_score}</span>`;
         if (res.finalist1_title) {
@@ -587,15 +588,67 @@ async function loadHistory() {
           ${detail}
         </div>`;
       }).join('');
-      return `<div style="margin-bottom:1.4rem">
+
+      // Ballots dropdown: table of voter × candidate scores
+      const ballots = e.ballots || {};
+      const voterNames = Object.keys(ballots).sort();
+      const candidates = e.results.map(r => r.candidate_title);
+      let ballotsHtml = '';
+      if (voterNames.length && candidates.length) {
+        const thCells = candidates.map(t =>
+          `<th style="padding:.3rem .5rem;font-size:.75rem;color:var(--muted);font-weight:600;white-space:nowrap;text-align:center;border-bottom:1px solid var(--border)">${esc(t)}</th>`
+        ).join('');
+        const rows = voterNames.map(voter => {
+          const scoreMap = {};
+          (ballots[voter] || []).forEach(b => { scoreMap[b.candidate_title] = b.score; });
+          const tds = candidates.map(t => {
+            const s = scoreMap[t];
+            const style = s === undefined ? 'color:var(--muted)' : s === 0 ? 'color:var(--danger)' : s >= 4 ? 'color:var(--success)' : '';
+            return `<td style="padding:.3rem .5rem;text-align:center;font-size:.85rem;${style}">${s !== undefined ? s : '—'}</td>`;
+          }).join('');
+          return `<tr>
+            <td style="padding:.3rem .6rem .3rem 0;font-size:.85rem;white-space:nowrap;border-right:1px solid var(--border)">${esc(voter)}</td>
+            ${tds}
+          </tr>`;
+        }).join('');
+        ballotsHtml = `
+          <div style="overflow-x:auto;margin-top:.6rem">
+            <table style="border-collapse:collapse;width:100%">
+              <thead><tr>
+                <th style="padding:.3rem .6rem .3rem 0;font-size:.75rem;color:var(--muted);font-weight:600;text-align:left;border-bottom:1px solid var(--border);border-right:1px solid var(--border)">Voter</th>
+                ${thCells}
+              </tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>`;
+      } else {
+        ballotsHtml = '<span style="color:var(--muted);font-size:.82rem">No ballot data recorded.</span>';
+      }
+
+      return `<div style="margin-bottom:1.6rem;padding-bottom:1.6rem;border-bottom:1px solid var(--border)">
         <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:.4rem">
           <span style="font-weight:600;font-size:1.05rem">${esc(e.title)}</span>
           <span style="color:var(--muted);font-size:.8rem">${fmtDate(e.completed_at)}</span>
         </div>
-        <div style="color:var(--muted);font-size:.8rem;margin-bottom:.5rem">${esc(modeLabel)} · ${e.n_winners} winner${e.n_winners !== 1 ? 's' : ''}</div>
+        <div style="color:var(--muted);font-size:.8rem;margin-bottom:.6rem">${esc(modeLabel)} · ${e.n_winners} winner${e.n_winners !== 1 ? 's' : ''}</div>
         <div>${resultsHtml}</div>
+        <details style="margin-top:.75rem">
+          <summary style="cursor:pointer;color:var(--muted);font-size:.82rem;user-select:none;list-style:none;display:flex;align-items:center;gap:.4rem">
+            <span class="details-arrow" style="font-size:.65rem">&#9654;</span>
+            Individual ballots (${voterNames.length} voter${voterNames.length !== 1 ? 's' : ''})
+          </summary>
+          ${ballotsHtml}
+        </details>
       </div>`;
     }).join('');
+
+    // Rotate arrow on open
+    el.querySelectorAll('details').forEach(d => {
+      d.addEventListener('toggle', () => {
+        const arrow = d.querySelector('.details-arrow');
+        if (arrow) arrow.style.transform = d.open ? 'rotate(90deg)' : '';
+      });
+    });
   } catch(e) {
     el.innerHTML = '<span style="color:var(--danger);font-size:.9rem">Failed to load history.</span>';
   }

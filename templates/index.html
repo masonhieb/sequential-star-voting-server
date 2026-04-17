@@ -872,12 +872,13 @@ function renderSubmitSection() {
 
 function renderVoters() {
   if (!state) return;
-  const voters   = state.voters || [];
-  const online   = voters.filter(v => v.active);
-  const voted    = online.filter(v => v.voted).length;
-  const total    = online.length;
+  const voters      = state.voters || [];
+  const online      = voters.filter(v => v.active);
+  const onlineVoted = online.filter(v => v.voted).length;
+  const totalVoted  = voters.filter(v => v.voted).length;
   document.getElementById('vote-count-stat').innerHTML =
-    `<strong>${voted}</strong> of <strong>${total}</strong> online voted this round`;
+    `<strong>${onlineVoted}</strong> of <strong>${online.length}</strong> online voted this round` +
+    `<br><span style="font-size:.8rem;color:var(--muted)"><strong>${totalVoted}</strong> of <strong>${voters.length}</strong> total registered voted</span>`;
 
   const list = document.getElementById('voters-list');
   list.innerHTML = voters.map(v => {
