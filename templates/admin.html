@@ -320,6 +320,20 @@ input[type="file"]::file-selector-button {
     </div>
   </div>
 
+  <!-- Candidate sets -->
+  <div class="card">
+    <h2>Candidate Sets</h2>
+    <div style="display:flex;gap:.75rem;align-items:flex-end;flex-wrap:wrap;margin-bottom:1rem">
+      <div class="form-group" style="flex:1;min-width:180px">
+        <label for="new-set-name">New Set Name</label>
+        <input type="text" id="new-set-name" placeholder="e.g. Company Retreat 2026">
+      </div>
+      <button class="btn" id="create-set-btn">Create Set</button>
+      <span class="msg" id="create-set-msg"></span>
+    </div>
+    <div id="sets-list"><span style="color:var(--muted);font-size:.9rem">Loading…</span></div>
+  </div>
+
   <!-- Unsubmit ballot -->
   <div class="card">
     <h2>Unsubmit Ballot</h2>
@@ -387,6 +401,7 @@ if (savedPw) {
 function initAdmin() {
   loadSettings();
   loadCandidates();
+  loadSets();
   loadHistory();
   loadVotersForUnsubmit();
 }
@@ -652,6 +667,134 @@ async function loadHistory() {
   } catch(e) {
     el.innerHTML = '<span style="color:var(--danger);font-size:.9rem">Failed to load history.</span>';
   }
+}
+
+// ── Candidate sets ──────────────────────────────────────────────────────────
+async function loadSets() {
+  const el = document.getElementById('sets-list');
+  try {
+    const r = await fetch('/api/admin/sets');
+    const sets = await r.json();
+    if (!sets.length) {
+      el.innerHTML = '<span style="color:var(--muted);font-size:.9rem">No sets yet.</span>';
+      return;
+    }
+    el.innerHTML = sets.map(s => {
+      const itemsHtml = s.items.length
+        ? s.items.map(item => {
+            const img = item.image_url
+              ? `<img src="${esc(item.image_url)}" style="width:40px;height:30px;object-fit:cover;border-radius:4px;border:1px solid var(--border);flex-shrink:0">`
+              : '';
+            const author = item.author ? `<span style="font-size:.75rem;color:var(--muted)"> — ${esc(item.author)}</span>` : '';
+            return `<div style="display:flex;align-items:center;gap:.6rem;padding:.3rem 0;border-bottom:1px solid var(--border)">
+              ${img}
+              <span style="flex:1;font-size:.88rem">${esc(item.title)}${author}</span>
+              <button class="btn btn-danger btn-sm" onclick="deleteSetItem(${s.id},${item.id},this)">✕</button>
+            </div>`;
+          }).join('')
+        : '<span style="color:var(--muted);font-size:.82rem">No candidates in this set.</span>';
+
+      return `<div style="border:1px solid var(--border);border-radius:8px;margin-bottom:.75rem;overflow:hidden">
+        <div style="display:flex;align-items:center;gap:.6rem;padding:.65rem .85rem;background:var(--surface2)">
+          <span style="flex:1;font-weight:600">${esc(s.name)}</span>
+          <span style="font-size:.78rem;color:var(--muted)">${s.items.length} candidate${s.items.length !== 1 ? 's' : ''}</span>
+          <button class="btn btn-sm" onclick="saveCurrentToSet(${s.id},'${esc(s.name).replace(/'/g,"\\'")}',this)" title="Overwrite this set with the current active candidates">Save Current Here</button>
+          <button class="btn btn-sm" onclick="loadSet(${s.id},'${esc(s.name).replace(/'/g,"\\'")}',this)" title="Load this set as the active candidates (requires no active votes)">Load into Election</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteSet(${s.id},this)">Delete</button>
+        </div>
+        <div style="padding:.6rem .85rem">
+          ${itemsHtml}
+          <div style="margin-top:.6rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+            <input type="text" placeholder="Add candidate title…" id="set-add-title-${s.id}" style="flex:1;min-width:140px;font-size:.85rem;padding:.4rem .65rem">
+            <button class="btn btn-sm" onclick="addSetItem(${s.id})">Add</button>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    el.innerHTML = '<span style="color:var(--danger);font-size:.9rem">Failed to load sets.</span>';
+  }
+}
+
+document.getElementById('create-set-btn').addEventListener('click', async () => {
+  const name = document.getElementById('new-set-name').value.trim();
+  const msg  = document.getElementById('create-set-msg');
+  if (!name) { showMsg(msg, 'Name required', false); return; }
+  try {
+    const r = await fetch('/api/admin/sets', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({name})
+    });
+    const d = await r.json();
+    if (!r.ok) { showMsg(msg, d.error || 'Error', false); return; }
+    document.getElementById('new-set-name').value = '';
+    showMsg(msg, 'Set created!', true);
+    loadSets();
+  } catch(e) { showMsg(msg, 'Network error', false); }
+});
+
+document.getElementById('new-set-name').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('create-set-btn').click();
+});
+
+async function deleteSet(id, btn) {
+  if (!confirm('Delete this set? This cannot be undone.')) return;
+  btn.disabled = true;
+  try {
+    await fetch(`/api/admin/sets/${id}`, {method: 'DELETE'});
+    loadSets();
+  } catch(e) { btn.disabled = false; alert('Network error'); }
+}
+
+async function addSetItem(setId) {
+  const input = document.getElementById(`set-add-title-${setId}`);
+  const title = input.value.trim();
+  if (!title) return;
+  try {
+    const r = await fetch(`/api/admin/sets/${setId}/items`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({title})
+    });
+    if (!r.ok) { alert((await r.json()).error || 'Error'); return; }
+    input.value = '';
+    loadSets();
+  } catch(e) { alert('Network error'); }
+}
+
+async function deleteSetItem(setId, itemId, btn) {
+  btn.disabled = true;
+  try {
+    await fetch(`/api/admin/sets/${setId}/items/${itemId}`, {method: 'DELETE'});
+    loadSets();
+  } catch(e) { btn.disabled = false; alert('Network error'); }
+}
+
+async function saveCurrentToSet(id, name, btn) {
+  if (!confirm(`Overwrite "${name}" with the current active candidates?`)) return;
+  btn.disabled = true;
+  try {
+    const r = await fetch(`/api/admin/sets/${id}/save-current`, {method: 'POST'});
+    const d = await r.json();
+    btn.disabled = false;
+    if (!r.ok) { alert(d.error || 'Error'); return; }
+    showMsg(document.getElementById('create-set-msg'), `Saved ${d.count} candidates to "${name}"`, true);
+    loadSets();
+  } catch(e) { btn.disabled = false; alert('Network error'); }
+}
+
+async function loadSet(id, name, btn) {
+  if (!confirm(`Load "${name}" as the active candidates? This replaces the current candidate list (requires no active votes).`)) return;
+  btn.disabled = true;
+  try {
+    const r = await fetch(`/api/admin/sets/${id}/load`, {method: 'POST'});
+    const d = await r.json();
+    btn.disabled = false;
+    if (!r.ok) { alert(d.error || 'Error'); return; }
+    showMsg(document.getElementById('create-set-msg'), `Loaded "${name}" into election!`, true);
+    loadCandidates();
+  } catch(e) { btn.disabled = false; alert('Network error'); }
 }
 
 // ── Unsubmit ballot ─────────────────────────────────────────────────────────

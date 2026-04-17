@@ -82,7 +82,34 @@ class VotingServer:
                 and resp.content_type == "text/html"
                 and resp.text
             ):
-                # Inject <base> for HTML elements + patch fetch/EventSource for JS
+                # When the app is served under a sub-path (e.g. /voting/) via a
+                # reverse proxy that strips the prefix before forwarding to us,
+                # the browser still sees URLs rooted at /voting/. Two categories
+                # of URL reference need fixing:
+                #
+                # 1. HTML element attributes (img src, a href, etc.)
+                #    The HTML <base href="/voting/"> tag tells the browser to
+                #    resolve ALL relative URLs in the document against /voting/
+                #    instead of /. Our templates use relative paths for images
+                #    (e.g. "images/foo.jpg") so they automatically resolve to
+                #    /voting/images/foo.jpg. Without this tag they'd resolve to
+                #    /images/foo.jpg and miss the proxy entirely.
+                #
+                # 2. JavaScript fetch() and EventSource() calls
+                #    The <base> tag has NO effect on JS. Our JS uses absolute
+                #    paths like fetch('/api/state') — the leading slash makes
+                #    the browser send the request to the root (/api/state), not
+                #    to /voting/api/state, so it hits the wrong backend entirely.
+                #    The injected script monkey-patches both window.fetch and
+                #    window.EventSource: any URL starting with '/' gets the
+                #    prefix prepended (e.g. '/api/state' → '/voting/api/state')
+                #    before the real browser function is called. URLs that are
+                #    already relative or use a full origin are left untouched.
+                #    EventSource.prototype is re-assigned so that instanceof
+                #    checks against the original class still pass.
+                #
+                # The script is minified to a single line to avoid any
+                # whitespace/newline issues when injected into the <head>.
                 patch = (
                     f'<script>!function(){{'
                     f'var p="{prefix}";'
@@ -347,7 +374,14 @@ class VotingServer:
         r.add_get("/api/voters", self._get_voters)
         r.add_post("/api/register", self._register)
         r.add_post("/api/vote", self._vote)
-        r.add_post("/api/admin/login", self._admin_login)
+        r.add_get("/api/admin/sets",                         self._admin_get_sets)
+        r.add_post("/api/admin/sets",                        self._admin_create_set)
+        r.add_delete("/api/admin/sets/{id}",                 self._admin_delete_set)
+        r.add_post("/api/admin/sets/{id}/items",             self._admin_add_set_item)
+        r.add_delete("/api/admin/sets/{id}/items/{item_id}", self._admin_delete_set_item)
+        r.add_post("/api/admin/sets/{id}/save-current",      self._admin_save_current_to_set)
+        r.add_post("/api/admin/sets/{id}/load",              self._admin_load_set)
+        r.add_post("/api/admin/login",                       self._admin_login)
         r.add_post("/api/admin/candidates", self._admin_add_candidate)
         r.add_delete("/api/admin/candidates/{id}", self._admin_delete_candidate)
         r.add_post("/api/admin/generate-test", self._admin_generate_test)
@@ -898,6 +932,131 @@ class VotingServer:
                 }
             )
         return web.json_response(elections)
+
+    # ── Candidate sets ────────────────────────────────────────────────────────
+
+    def _set_items(self, db: sqlite3.Connection, set_id: int) -> list[dict]:
+        return [
+            {
+                "id":         row["id"],
+                "title":      row["title"],
+                "body":       row["body"],
+                "author":     row["author"],
+                "image_url":  f"images/{row['image_path']}" if row["image_path"] else None,
+                "image_path": row["image_path"],
+            }
+            for row in db.execute(
+                "SELECT * FROM candidate_set_items WHERE set_id = ? ORDER BY id",
+                (set_id,),
+            ).fetchall()
+        ]
+
+    async def _admin_get_sets(self, request: web.Request) -> web.Response:
+        db = request["db"]
+        sets = []
+        for s in db.execute("SELECT * FROM candidate_sets ORDER BY name").fetchall():
+            sets.append({
+                "id":    s["id"],
+                "name":  s["name"],
+                "items": self._set_items(db, s["id"]),
+            })
+        return web.json_response(sets)
+
+    async def _admin_create_set(self, request: web.Request) -> web.Response:
+        db   = request["db"]
+        data = await request.json()
+        name = (data.get("name") or "").strip()
+        if not name:
+            return web.json_response({"error": "Name required"}, status=400)
+        try:
+            db.execute("INSERT INTO candidate_sets (name) VALUES (?)", (name,))
+            db.commit()
+        except Exception:
+            return web.json_response({"error": "A set with that name already exists"}, status=400)
+        row = db.execute("SELECT * FROM candidate_sets WHERE name = ?", (name,)).fetchone()
+        return web.json_response({"id": row["id"], "name": row["name"], "items": []})
+
+    async def _admin_delete_set(self, request: web.Request) -> web.Response:
+        db     = request["db"]
+        set_id = int(request.match_info["id"])
+        db.execute("DELETE FROM candidate_sets WHERE id = ?", (set_id,))
+        db.commit()
+        return web.json_response({"ok": True})
+
+    async def _admin_add_set_item(self, request: web.Request) -> web.Response:
+        db     = request["db"]
+        set_id = int(request.match_info["id"])
+        if not db.execute("SELECT 1 FROM candidate_sets WHERE id = ?", (set_id,)).fetchone():
+            return web.json_response({"error": "Set not found"}, status=404)
+        data   = await request.json()
+        title  = (data.get("title") or "").strip()
+        if not title:
+            return web.json_response({"error": "Title required"}, status=400)
+        body       = (data.get("body")       or "").strip()
+        author     = (data.get("author")     or "").strip() or None
+        image_path = (data.get("image_path") or "").strip() or None
+        db.execute(
+            "INSERT INTO candidate_set_items (set_id, title, body, author, image_path)"
+            " VALUES (?,?,?,?,?)",
+            (set_id, title, body, author, image_path),
+        )
+        db.commit()
+        row = db.execute(
+            "SELECT * FROM candidate_set_items WHERE set_id = ? ORDER BY id DESC LIMIT 1",
+            (set_id,),
+        ).fetchone()
+        return web.json_response({
+            "id": row["id"], "title": row["title"], "body": row["body"],
+            "author": row["author"],
+            "image_url": f"images/{row['image_path']}" if row["image_path"] else None,
+            "image_path": row["image_path"],
+        })
+
+    async def _admin_delete_set_item(self, request: web.Request) -> web.Response:
+        db      = request["db"]
+        item_id = int(request.match_info["item_id"])
+        db.execute("DELETE FROM candidate_set_items WHERE id = ?", (item_id,))
+        db.commit()
+        return web.json_response({"ok": True})
+
+    async def _admin_save_current_to_set(self, request: web.Request) -> web.Response:
+        db     = request["db"]
+        set_id = int(request.match_info["id"])
+        if not db.execute("SELECT 1 FROM candidate_sets WHERE id = ?", (set_id,)).fetchone():
+            return web.json_response({"error": "Set not found"}, status=404)
+        db.execute("DELETE FROM candidate_set_items WHERE set_id = ?", (set_id,))
+        for c in db.execute("SELECT * FROM candidates ORDER BY id").fetchall():
+            db.execute(
+                "INSERT INTO candidate_set_items (set_id, title, body, author, image_path)"
+                " VALUES (?,?,?,?,?)",
+                (set_id, c["title"], c["body"], c["author"], c["image_path"]),
+            )
+        db.commit()
+        return web.json_response({"ok": True, "count": db.execute(
+            "SELECT COUNT(*) FROM candidate_set_items WHERE set_id = ?", (set_id,)
+        ).fetchone()[0]})
+
+    async def _admin_load_set(self, request: web.Request) -> web.Response:
+        db     = request["db"]
+        set_id = int(request.match_info["id"])
+        if not db.execute("SELECT 1 FROM candidate_sets WHERE id = ?", (set_id,)).fetchone():
+            return web.json_response({"error": "Set not found"}, status=404)
+        if db.execute("SELECT 1 FROM votes LIMIT 1").fetchone():
+            return web.json_response(
+                {"error": "Reset the election first before loading a new candidate set"},
+                status=400,
+            )
+        db.execute("DELETE FROM candidates")
+        for item in db.execute(
+            "SELECT * FROM candidate_set_items WHERE set_id = ? ORDER BY id", (set_id,)
+        ).fetchall():
+            db.execute(
+                "INSERT INTO candidates (title, body, author, image_path) VALUES (?,?,?,?)",
+                (item["title"], item["body"], item["author"], item["image_path"]),
+            )
+        db.commit()
+        await self._broadcast("state_update", self._build_state(db))
+        return web.json_response({"ok": True})
 
     async def _admin_login(self, request: web.Request) -> web.Response:
         data = await request.json()

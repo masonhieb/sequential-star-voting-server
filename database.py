@@ -101,6 +101,20 @@ def init_db(path: Path) -> None:
                 score           INTEGER NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS candidate_sets (
+                id   INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE
+            );
+
+            CREATE TABLE IF NOT EXISTS candidate_set_items (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                set_id     INTEGER NOT NULL REFERENCES candidate_sets(id) ON DELETE CASCADE,
+                title      TEXT NOT NULL,
+                body       TEXT NOT NULL DEFAULT '',
+                author     TEXT,
+                image_path TEXT
+            );
+
             INSERT OR IGNORE INTO settings VALUES ('n_winners', '1');
             INSERT OR IGNORE INTO settings VALUES ('voting_mode', 'star');
             INSERT OR IGNORE INTO settings VALUES ('election_title', '');
