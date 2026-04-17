@@ -47,23 +47,47 @@ class VotingServer:
         templates_dir: str = "templates",
         host: str = "0.0.0.0",
         port: int = 8080,
+        prefix: str = "",
     ):
         self.db_path = Path(db_path)
         self.images_dir = Path(images_dir)
         self.templates_dir = Path(templates_dir)
         self.host = host
         self.port = port
+        self.prefix = prefix.rstrip("/")
         # voter_name_lower -> asyncio.Queue for SSE
         self._sse_clients: dict[str, asyncio.Queue] = {}
 
         self.images_dir.mkdir(exist_ok=True)
         self.templates_dir.mkdir(exist_ok=True)
 
-        self.app = web.Application(middlewares=[self._make_db_middleware()])
+        self.app = web.Application(middlewares=[self._make_db_middleware(), self._make_base_middleware()])
         self._setup_routes()
         database.init_db(self.db_path)
 
     # ── Middleware ────────────────────────────────────────────────────────────
+
+    def _make_base_middleware(self):
+        prefix = self.prefix
+
+        @web.middleware
+        async def base_middleware(request: web.Request, handler):
+            resp = await handler(request)
+            if (
+                prefix
+                and isinstance(resp, web.Response)
+                and resp.content_type == "text/html"
+                and resp.text
+            ):
+                body = resp.text.replace(
+                    "<head>", f'<head>\n  <base href="{prefix}/">', 1
+                )
+                return web.Response(text=body, content_type="text/html",
+                                    headers={k: v for k, v in resp.headers.items()
+                                             if k.lower() != "content-length"})
+            return resp
+
+        return base_middleware
 
     def _make_db_middleware(self):
         db_path = self.db_path
@@ -890,8 +914,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="N Sequential STAR Voting Server")
     parser.add_argument("--host", default="0.0.0.0", help="Bind host")
     parser.add_argument("--port", type=int, default=8080, help="Bind port")
-    parser.add_argument("--db",   default="voting.db",  help="SQLite database path")
+    parser.add_argument("--db",     default="voting.db", help="SQLite database path")
+    parser.add_argument("--prefix", default="",         help="URL path prefix, e.g. /voting")
     args = parser.parse_args()
 
-    server = VotingServer(db_path=args.db, host=args.host, port=args.port)
+    server = VotingServer(db_path=args.db, host=args.host, port=args.port, prefix=args.prefix)
     server.run()
