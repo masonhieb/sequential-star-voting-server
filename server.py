@@ -24,13 +24,14 @@ import test_data
 
 try:
     from PIL import Image
+
     PIL_AVAILABLE = True
 except ImportError:
     PIL_AVAILABLE = False
 
 MASON_FIRST_NAME = "mason"
-MASON_LAST_NAME  = "hieb"
-ADMIN_PASSWORD   = "hunter2"
+MASON_LAST_NAME = "hieb"
+ADMIN_PASSWORD = "hunter2"
 MAX_IMAGE_DIM = 500
 ALLOWED_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
 
@@ -61,7 +62,9 @@ class VotingServer:
         self.images_dir.mkdir(exist_ok=True)
         self.templates_dir.mkdir(exist_ok=True)
 
-        self.app = web.Application(middlewares=[self._make_db_middleware(), self._make_base_middleware()])
+        self.app = web.Application(
+            middlewares=[self._make_db_middleware(), self._make_base_middleware()]
+        )
         self._setup_routes()
         database.init_db(self.db_path)
 
@@ -82,9 +85,15 @@ class VotingServer:
                 body = resp.text.replace(
                     "<head>", f'<head>\n  <base href="{prefix}/">', 1
                 )
-                return web.Response(text=body, content_type="text/html",
-                                    headers={k: v for k, v in resp.headers.items()
-                                             if k.lower() != "content-length"})
+                return web.Response(
+                    text=body,
+                    content_type="text/html",
+                    headers={
+                        k: v
+                        for k, v in resp.headers.items()
+                        if k.lower() not in ("content-length", "content-type")
+                    },
+                )
             return resp
 
         return base_middleware
@@ -143,14 +152,14 @@ class VotingServer:
         ]
 
     def _build_state(self, db: sqlite3.Connection) -> dict:
-        n_winners      = int(database.get_setting(db, "n_winners", "1"))
-        voting_mode    = database.get_setting(db, "voting_mode", "star")
+        n_winners = int(database.get_setting(db, "n_winners", "1"))
+        voting_mode = database.get_setting(db, "voting_mode", "star")
         election_title = database.get_setting(db, "election_title", "")
-        round_row   = database.current_round(db)
+        round_row = database.current_round(db)
         if not round_row:
             return {}
 
-        round_id     = round_row["id"]
+        round_id = round_row["id"]
         round_number = round_row["round_number"]
         round_status = round_row["status"]
 
@@ -180,7 +189,7 @@ class VotingServer:
             raw = json.loads(w["all_scores"]) if w["all_scores"] else {}
             all_scores_list = []
             for cid_str, score in sorted(raw.items(), key=lambda x: -x[1]):
-                cid  = int(cid_str)
+                cid = int(cid_str)
                 cand = db.execute(
                     "SELECT title FROM candidates WHERE id = ?", (cid,)
                 ).fetchone()
@@ -228,7 +237,7 @@ class VotingServer:
     def _compute_star_winner(
         self, db: sqlite3.Connection, round_id: int
     ) -> Optional[dict]:
-        eligible     = database.eligible_candidates(db)
+        eligible = database.eligible_candidates(db)
         eligible_ids = [c["id"] for c in eligible]
 
         if not eligible_ids:
@@ -260,7 +269,7 @@ class VotingServer:
                 if cid in totals:
                     totals[cid] += score
 
-        sorted_ids  = sorted(eligible_ids, key=lambda x: totals[x], reverse=True)
+        sorted_ids = sorted(eligible_ids, key=lambda x: totals[x], reverse=True)
         f1_id, f2_id = sorted_ids[0], sorted_ids[1]
 
         f1_votes = f2_votes = 0
@@ -287,7 +296,7 @@ class VotingServer:
         self, db: sqlite3.Connection, round_id: int, n: int
     ) -> list[dict]:
         """Return top-N candidates ordered by total score (no runoff)."""
-        eligible     = database.eligible_candidates(db)
+        eligible = database.eligible_candidates(db)
         eligible_ids = [c["id"] for c in eligible]
 
         totals: dict[int, int] = {cid: 0 for cid in eligible_ids}
@@ -300,10 +309,7 @@ class VotingServer:
                 totals[row["candidate_id"]] = row["total"]
 
         ranked = sorted(eligible_ids, key=lambda x: totals[x], reverse=True)
-        return [
-            {"candidate_id": cid, "total_score": totals[cid]}
-            for cid in ranked[:n]
-        ]
+        return [{"candidate_id": cid, "total_score": totals[cid]} for cid in ranked[:n]]
 
     # ── SSE broadcast ─────────────────────────────────────────────────────────
 
@@ -322,26 +328,26 @@ class VotingServer:
 
     def _setup_routes(self):
         r = self.app.router
-        r.add_get("/",           self._index)
-        r.add_get("/admin",      self._admin_page)
+        r.add_get("/", self._index)
+        r.add_get("/admin", self._admin_page)
         r.add_get("/api/stream", self._stream)
-        r.add_get("/api/state",      self._get_state)
+        r.add_get("/api/state", self._get_state)
         r.add_get("/api/candidates", self._get_candidates)
-        r.add_get("/api/voters",     self._get_voters)
-        r.add_post("/api/register",  self._register)
-        r.add_post("/api/vote",      self._vote)
-        r.add_post("/api/admin/login",                self._admin_login)
-        r.add_post("/api/admin/candidates",           self._admin_add_candidate)
-        r.add_delete("/api/admin/candidates/{id}",    self._admin_delete_candidate)
-        r.add_post("/api/admin/generate-test",        self._admin_generate_test)
-        r.add_post("/api/admin/clear-candidates",     self._admin_clear_candidates)
-        r.add_post("/api/admin/settings",             self._admin_update_settings)
-        r.add_post("/api/admin/reveal",               self._admin_reveal_winner)
-        r.add_post("/api/admin/reset",                self._admin_reset)
-        r.add_get("/api/admin/elections",             self._admin_get_elections)
-        r.add_post("/api/admin/unsubmit",             self._admin_unsubmit)
-        r.add_post("/api/admin/upload-image",         self._admin_upload_image)
-        r.add_get("/api/my-scores",                   self._get_my_scores)
+        r.add_get("/api/voters", self._get_voters)
+        r.add_post("/api/register", self._register)
+        r.add_post("/api/vote", self._vote)
+        r.add_post("/api/admin/login", self._admin_login)
+        r.add_post("/api/admin/candidates", self._admin_add_candidate)
+        r.add_delete("/api/admin/candidates/{id}", self._admin_delete_candidate)
+        r.add_post("/api/admin/generate-test", self._admin_generate_test)
+        r.add_post("/api/admin/clear-candidates", self._admin_clear_candidates)
+        r.add_post("/api/admin/settings", self._admin_update_settings)
+        r.add_post("/api/admin/reveal", self._admin_reveal_winner)
+        r.add_post("/api/admin/reset", self._admin_reset)
+        r.add_get("/api/admin/elections", self._admin_get_elections)
+        r.add_post("/api/admin/unsubmit", self._admin_unsubmit)
+        r.add_post("/api/admin/upload-image", self._admin_upload_image)
+        r.add_get("/api/my-scores", self._get_my_scores)
         r.add_static("/images", self.images_dir, name="images")
 
     async def _index(self, _request: web.Request) -> web.Response:
@@ -411,7 +417,9 @@ class VotingServer:
                     "body": c["body"],
                     "body_html": render_markdown(c["body"]),
                     "author": c["author"],
-                    "image_url": f"/images/{c['image_path']}" if c["image_path"] else None,
+                    "image_url": f"/images/{c['image_path']}"
+                    if c["image_path"]
+                    else None,
                 }
                 for c in rows
             ]
@@ -443,10 +451,10 @@ class VotingServer:
         return web.json_response(scores)
 
     async def _register(self, request: web.Request) -> web.Response:
-        db   = request["db"]
+        db = request["db"]
         data = await request.json()
         first_name = data.get("first_name", "").strip()
-        last_name  = data.get("last_name",  "").strip()
+        last_name = data.get("last_name", "").strip()
 
         if not first_name:
             return web.json_response({"error": "First name required"}, status=400)
@@ -454,20 +462,24 @@ class VotingServer:
             return web.json_response({"error": "Last name required"}, status=400)
 
         name_lower = f"{first_name} {last_name}".lower()
-        existing   = db.execute(
+        existing = db.execute(
             "SELECT * FROM voters WHERE name_lower = ?", (name_lower,)
         ).fetchone()
 
         if existing:
             if existing["name_lower"] in self._sse_clients:
-                return web.json_response({"error": "That user is already signed in."}, status=409)
+                return web.json_response(
+                    {"error": "That user is already signed in."}, status=409
+                )
             return web.json_response(
                 {
-                    "id":           existing["id"],
-                    "first_name":   existing["first_name"],
-                    "last_name":    existing["last_name"],
-                    "name":         f"{existing['first_name']} {existing['last_name']}",
-                    "is_mason":     self._is_mason(existing["first_name"], existing["last_name"]),
+                    "id": existing["id"],
+                    "first_name": existing["first_name"],
+                    "last_name": existing["last_name"],
+                    "name": f"{existing['first_name']} {existing['last_name']}",
+                    "is_mason": self._is_mason(
+                        existing["first_name"], existing["last_name"]
+                    ),
                     "already_exists": True,
                 }
             )
@@ -485,20 +497,20 @@ class VotingServer:
 
         return web.json_response(
             {
-                "id":         voter["id"],
+                "id": voter["id"],
                 "first_name": voter["first_name"],
-                "last_name":  voter["last_name"],
-                "name":       f"{voter['first_name']} {voter['last_name']}",
-                "is_mason":   self._is_mason(voter["first_name"], voter["last_name"]),
+                "last_name": voter["last_name"],
+                "name": f"{voter['first_name']} {voter['last_name']}",
+                "is_mason": self._is_mason(voter["first_name"], voter["last_name"]),
                 "already_exists": False,
             }
         )
 
     async def _vote(self, request: web.Request) -> web.Response:
-        db         = request["db"]
-        data       = await request.json()
+        db = request["db"]
+        data = await request.json()
         voter_name = data.get("voter_name", "").strip()
-        scores     = data.get("scores", {})
+        scores = data.get("scores", {})
 
         if not voter_name:
             return web.json_response({"error": "voter_name required"}, status=400)
@@ -513,7 +525,7 @@ class VotingServer:
         if not round_row or round_row["status"] != "voting":
             return web.json_response({"error": "No active voting round"}, status=400)
 
-        round_id     = round_row["id"]
+        round_id = round_row["id"]
         eligible_ids = {c["id"] for c in database.eligible_candidates(db)}
 
         if {int(k) for k in scores.keys()} != eligible_ids:
@@ -547,13 +559,13 @@ class VotingServer:
     # ── Admin endpoints ───────────────────────────────────────────────────────
 
     async def _admin_add_candidate(self, request: web.Request) -> web.Response:
-        db   = request["db"]
+        db = request["db"]
         data = await request.json()
         title = data.get("title", "").strip()
         if not title:
             return web.json_response({"error": "Title required"}, status=400)
-        body       = (data.get("body")       or "").strip()
-        author     = (data.get("author")     or "").strip() or None
+        body = (data.get("body") or "").strip()
+        author = (data.get("author") or "").strip() or None
         image_path = (data.get("image_path") or "").strip() or None
 
         db.execute(
@@ -565,11 +577,9 @@ class VotingServer:
         return web.json_response({"ok": True})
 
     async def _admin_delete_candidate(self, request: web.Request) -> web.Response:
-        db  = request["db"]
+        db = request["db"]
         cid = int(request.match_info["id"])
-        if db.execute(
-            "SELECT 1 FROM votes WHERE candidate_id = ?", (cid,)
-        ).fetchone():
+        if db.execute("SELECT 1 FROM votes WHERE candidate_id = ?", (cid,)).fetchone():
             return web.json_response(
                 {"error": "Cannot delete a candidate that has received votes"},
                 status=400,
@@ -583,7 +593,9 @@ class VotingServer:
         db = request["db"]
         if db.execute("SELECT 1 FROM votes LIMIT 1").fetchone():
             return web.json_response(
-                {"error": "Reset the election first to clear all votes, then you can clear candidates"},
+                {
+                    "error": "Reset the election first to clear all votes, then you can clear candidates"
+                },
                 status=400,
             )
         db.execute("DELETE FROM candidates")
@@ -595,7 +607,9 @@ class VotingServer:
         db = request["db"]
         if db.execute("SELECT 1 FROM candidates LIMIT 1").fetchone():
             return web.json_response(
-                {"error": "Candidates already exist — clear them before generating test data"},
+                {
+                    "error": "Candidates already exist — clear them before generating test data"
+                },
                 status=400,
             )
         candidates = test_data.generate_test_candidates(10)
@@ -609,9 +623,9 @@ class VotingServer:
         return web.json_response({"ok": True, "count": len(candidates)})
 
     async def _admin_update_settings(self, request: web.Request) -> web.Response:
-        db   = request["db"]
+        db = request["db"]
         data = await request.json()
-        err  = self._require_mason(data)
+        err = self._require_mason(data)
         if err:
             return err
         if "n_winners" in data:
@@ -640,9 +654,9 @@ class VotingServer:
         return web.json_response({"ok": True})
 
     async def _admin_reveal_winner(self, request: web.Request) -> web.Response:
-        db   = request["db"]
+        db = request["db"]
         data = await request.json()
-        err  = self._require_mason(data)
+        err = self._require_mason(data)
         if err:
             return err
 
@@ -650,21 +664,23 @@ class VotingServer:
         if not round_row or round_row["status"] != "voting":
             return web.json_response({"error": "No active voting round"}, status=400)
 
-        n_winners      = int(database.get_setting(db, "n_winners", "1"))
-        voting_mode    = database.get_setting(db, "voting_mode", "star")
+        n_winners = int(database.get_setting(db, "n_winners", "1"))
+        voting_mode = database.get_setting(db, "voting_mode", "star")
         existing_count = db.execute("SELECT COUNT(*) FROM winners").fetchone()[0]
         if existing_count >= n_winners:
             return web.json_response(
                 {"error": "All winners already elected"}, status=400
             )
 
-        round_number    = round_row["round_number"]
+        round_number = round_row["round_number"]
         all_scores_json: str
 
         if voting_mode == "score":
             ranked = self._compute_score_winners(db, round_row["id"], n_winners)
             if not ranked:
-                return web.json_response({"error": "No eligible candidates"}, status=400)
+                return web.json_response(
+                    {"error": "No eligible candidates"}, status=400
+                )
             eligible_ids = [c["id"] for c in database.eligible_candidates(db)]
             totals: dict[int, int] = {cid: 0 for cid in eligible_ids}
             for row in db.execute(
@@ -687,8 +703,10 @@ class VotingServer:
         else:
             result = self._compute_star_winner(db, round_row["id"])
             if not result:
-                return web.json_response({"error": "No eligible candidates"}, status=400)
-            winner_id    = result["winner_id"]
+                return web.json_response(
+                    {"error": "No eligible candidates"}, status=400
+                )
+            winner_id = result["winner_id"]
             total_scores = result["total_scores"]
             all_scores_json = json.dumps({str(k): v for k, v in total_scores.items()})
             db.execute(
@@ -711,11 +729,13 @@ class VotingServer:
             new_count = existing_count + 1
             if new_count >= n_winners:
                 db.execute(
-                    "UPDATE rounds SET status = 'complete' WHERE id = ?", (round_row["id"],)
+                    "UPDATE rounds SET status = 'complete' WHERE id = ?",
+                    (round_row["id"],),
                 )
             else:
                 db.execute(
-                    "UPDATE rounds SET status = 'revealed' WHERE id = ?", (round_row["id"],)
+                    "UPDATE rounds SET status = 'revealed' WHERE id = ?",
+                    (round_row["id"],),
                 )
                 db.execute(
                     "INSERT INTO rounds (round_number, status) VALUES (?, 'voting')",
@@ -727,17 +747,19 @@ class VotingServer:
         return web.json_response({"ok": True})
 
     async def _admin_reset(self, request: web.Request) -> web.Response:
-        db   = request["db"]
+        db = request["db"]
         data = await request.json()
-        err  = self._require_mason(data)
+        err = self._require_mason(data)
         if err:
             return err
 
         # Snapshot any completed winners into election history before wiping
         if db.execute("SELECT 1 FROM winners LIMIT 1").fetchone():
-            title       = database.get_setting(db, "election_title", "") or "Untitled Election"
+            title = (
+                database.get_setting(db, "election_title", "") or "Untitled Election"
+            )
             voting_mode = database.get_setting(db, "voting_mode", "star")
-            n_winners   = int(database.get_setting(db, "n_winners", "1"))
+            n_winners = int(database.get_setting(db, "n_winners", "1"))
             db.execute(
                 "INSERT INTO elections (title, voting_mode, n_winners) VALUES (?,?,?)",
                 (title, voting_mode, n_winners),
@@ -772,9 +794,14 @@ class VotingServer:
                         finalist2_title, finalist2_runoff_votes, all_scores)
                        VALUES (?,?,?,?,?,?,?,?,?)""",
                     (
-                        election_id, w["round_number"], w["cand_title"], w["total_score"],
-                        w["f1_title"], w["finalist1_runoff_votes"],
-                        w["f2_title"], w["finalist2_runoff_votes"],
+                        election_id,
+                        w["round_number"],
+                        w["cand_title"],
+                        w["total_score"],
+                        w["f1_title"],
+                        w["finalist1_runoff_votes"],
+                        w["f2_title"],
+                        w["finalist2_runoff_votes"],
                         json.dumps(resolved),
                     ),
                 )
@@ -793,16 +820,23 @@ class VotingServer:
                 db.execute(
                     "INSERT INTO election_ballots (election_id, voter_name, candidate_title, score)"
                     " VALUES (?,?,?,?)",
-                    (election_id, row["voter_name"], row["candidate_title"], row["score"]),
+                    (
+                        election_id,
+                        row["voter_name"],
+                        row["candidate_title"],
+                        row["score"],
+                    ),
                 )
 
-        db.executescript("""
+        db.executescript(
+            """
             DELETE FROM votes;
             DELETE FROM ballots;
             DELETE FROM winners;
             DELETE FROM rounds;
             INSERT INTO rounds (round_number, status) VALUES (1, 'voting');
-        """)
+        """
+        )
         db.commit()
         await self._broadcast("state_update", self._build_state(db))
         return web.json_response({"ok": True})
@@ -820,14 +854,16 @@ class VotingServer:
             ).fetchall():
                 results.append(
                     {
-                        "place":                  r["place"],
-                        "candidate_title":        r["candidate_title"],
-                        "total_score":            r["total_score"],
-                        "finalist1_title":        r["finalist1_title"],
+                        "place": r["place"],
+                        "candidate_title": r["candidate_title"],
+                        "total_score": r["total_score"],
+                        "finalist1_title": r["finalist1_title"],
                         "finalist1_runoff_votes": r["finalist1_runoff_votes"],
-                        "finalist2_title":        r["finalist2_title"],
+                        "finalist2_title": r["finalist2_title"],
                         "finalist2_runoff_votes": r["finalist2_runoff_votes"],
-                        "all_scores":             json.loads(r["all_scores"]) if r["all_scores"] else [],
+                        "all_scores": json.loads(r["all_scores"])
+                        if r["all_scores"]
+                        else [],
                     }
                 )
             ballots: dict[str, list] = {}
@@ -841,13 +877,13 @@ class VotingServer:
                 )
             elections.append(
                 {
-                    "id":           e["id"],
-                    "title":        e["title"],
-                    "voting_mode":  e["voting_mode"],
-                    "n_winners":    e["n_winners"],
+                    "id": e["id"],
+                    "title": e["title"],
+                    "voting_mode": e["voting_mode"],
+                    "n_winners": e["n_winners"],
                     "completed_at": e["completed_at"],
-                    "results":      results,
-                    "ballots":      ballots,
+                    "results": results,
+                    "ballots": ballots,
                 }
             )
         return web.json_response(elections)
@@ -859,7 +895,7 @@ class VotingServer:
         return web.json_response({"error": "Wrong password"}, status=401)
 
     async def _admin_unsubmit(self, request: web.Request) -> web.Response:
-        db   = request["db"]
+        db = request["db"]
         data = await request.json()
         if data.get("admin_password") != ADMIN_PASSWORD:
             return web.json_response({"error": "Unauthorized"}, status=401)
@@ -878,18 +914,20 @@ class VotingServer:
         return web.json_response({"ok": True})
 
     async def _admin_upload_image(self, request: web.Request) -> web.Response:
-        reader   = await request.multipart()
+        reader = await request.multipart()
         filename = None
         async for field in reader:
             if field.name != "image":
                 continue
             orig = field.filename or "image.jpg"
-            ext  = Path(orig).suffix.lower()
+            ext = Path(orig).suffix.lower()
             if ext not in ALLOWED_IMAGE_EXTS:
-                return web.json_response({"error": "Unsupported image type"}, status=400)
-            data  = await field.read()
+                return web.json_response(
+                    {"error": "Unsupported image type"}, status=400
+                )
+            data = await field.read()
             fname = f"{int(time.time() * 1000)}{ext}"
-            dest  = self.images_dir / fname
+            dest = self.images_dir / fname
             if PIL_AVAILABLE:
                 img = Image.open(io.BytesIO(data))
                 img.thumbnail((MAX_IMAGE_DIM, MAX_IMAGE_DIM), Image.LANCZOS)
@@ -914,9 +952,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="N Sequential STAR Voting Server")
     parser.add_argument("--host", default="0.0.0.0", help="Bind host")
     parser.add_argument("--port", type=int, default=8080, help="Bind port")
-    parser.add_argument("--db",     default="voting.db", help="SQLite database path")
-    parser.add_argument("--prefix", default="",         help="URL path prefix, e.g. /voting")
+    parser.add_argument("--db", default="voting.db", help="SQLite database path")
+    parser.add_argument("--prefix", default="", help="URL path prefix, e.g. /voting")
     args = parser.parse_args()
 
-    server = VotingServer(db_path=args.db, host=args.host, port=args.port, prefix=args.prefix)
+    server = VotingServer(
+        db_path=args.db, host=args.host, port=args.port, prefix=args.prefix
+    )
     server.run()

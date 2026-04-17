@@ -17,7 +17,8 @@ def get_db(path: Path) -> sqlite3.Connection:
 def init_db(path: Path) -> None:
     db = get_db(path)
     try:
-        db.executescript("""
+        db.executescript(
+            """
             CREATE TABLE IF NOT EXISTS settings (
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL
@@ -103,11 +104,10 @@ def init_db(path: Path) -> None:
             INSERT OR IGNORE INTO settings VALUES ('n_winners', '1');
             INSERT OR IGNORE INTO settings VALUES ('voting_mode', 'star');
             INSERT OR IGNORE INTO settings VALUES ('election_title', '');
-        """)
+        """
+        )
         if not db.execute("SELECT 1 FROM rounds").fetchone():
-            db.execute(
-                "INSERT INTO rounds (round_number, status) VALUES (1, 'voting')"
-            )
+            db.execute("INSERT INTO rounds (round_number, status) VALUES (1, 'voting')")
         db.commit()
     finally:
         db.close()
