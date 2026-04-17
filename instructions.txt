@@ -1,0 +1,74 @@
+N Sequential STAR Voting Server — Requirements
+===============================================
+
+VOTING SYSTEM
+-------------
+- STAR voting: each voter scores every candidate 0–5 points
+- STAR algorithm:
+    1. Scoring round: sum all scores per candidate
+    2. Automatic Runoff: top 2 scorers face off head-to-head;
+       the candidate preferred by more voters wins; tiebreak goes to higher total score
+- N sequential rounds: after each round the winner is removed from the candidate pool
+  and stored in a winner hierarchy (1st place, 2nd place, … Nth place)
+- N is configurable (default 1); supports electing 1 or more winners in ranked order
+- Candidates are "things", not people — each has:
+    - title (required)
+    - body (markdown, rendered to HTML via python-markdown)
+    - author (optional)
+    - image (optional, stored in images/ directory, resized to ≤500 px via Pillow)
+
+FRONTEND (voter page at /)
+--------------------------
+- Users enter their full name (first + last required)
+- Names are case-insensitively unique; no duplicate names permitted
+- Returning users can pick their name from a list of previously registered names
+- "HELLO <NAME>" displayed in large letters at the top once logged in
+- Each registered name = one voter per round
+- Live sidebar shows all registered voters with:
+    - Green checkmark once they submit their ballot for the current round
+    - Indicator if they are currently active (SSE-connected)
+- Vote totals displayed when a winner is revealed
+- JavaScript SSE stream keeps all connected clients live and in sync
+- Dark color scheme
+
+ADMIN (Mason Hieb only)
+-----------------------
+- Only the user named "Mason Hieb" may:
+    - Advance / reveal the round winner
+    - Reset the election (clears all votes; keeps candidates and voter names)
+- Mason registers via the same main frontend (name entry)
+- Mason's controls (Reveal Winner, Reset Election) appear on the main page only for Mason
+- Admin page at /admin: candidate management (add/delete) and N winners setting
+
+BACKEND / SERVER
+----------------
+- aiohttp HTTP server
+- Server code entirely in server.py as a class (VotingServer)
+- SQLite3 as persistent store; DB connection injected into each request via middleware
+- Server constructed with: db_path, images_dir, templates_dir, host, port
+- Static images served from images/ directory
+- Templates served from templates/ directory
+
+DATABASE TABLES
+---------------
+settings        (key, value)
+candidates      (id, title, body, author, image_path)
+voters          (id, name, name_lower)
+rounds          (id, round_number, status)  -- voting | revealed | complete
+votes           (voter_id, candidate_id, round_id, score 0–5)
+ballots         (voter_id, round_id)        -- marks ballot as submitted
+winners         (id, candidate_id, round_number, total_score,
+                 finalist1_id, finalist1_runoff_votes,
+                 finalist2_id, finalist2_runoff_votes, all_scores JSON)
+
+ROUND FLOW
+----------
+1. Candidates added via /admin; N configured
+2. Voters register on main page and score every eligible candidate (0–5)
+3. Mason clicks "Reveal Winner":
+   - STAR algorithm runs
+   - Winner stored in winners table
+   - If winners.count < N: next round opens with remaining candidates
+   - If winners.count == N: election marked complete
+4. Winner overlay shown to all connected clients live via SSE
+5. Mason resets if needed (keeps candidates & voters, wipes votes/rounds/winners)

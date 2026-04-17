@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>STAR Voting — Admin</title>
+<style>
+:root {
+  --bg:       #0f172a;
+  --surface:  #1e293b;
+  --surface2: #263248;
+  --border:   #334155;
+  --text:     #e2e8f0;
+  --muted:    #94a3b8;
+  --primary:  #6366f1;
+  --primary-h:#818cf8;
+  --success:  #10b981;
+  --danger:   #ef4444;
+  --warn:     #f59e0b;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 1rem 1.5rem;
+  display: flex; align-items: center; gap: 1rem;
+}
+header h1 { font-size: 1.3rem; font-weight: 800; }
+header a  { color: var(--primary-h); font-size: .85rem; margin-left: auto; text-decoration: none; }
+header a:hover { text-decoration: underline; }
+
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.5rem;
+}
+.card h2 {
+  font-size: .85rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--muted);
+  margin-bottom: 1rem;
+}
+
+/* Form elements */
+.form-row {
+  display: flex;
+  gap: .75rem;
+  flex-wrap: wrap;
+  margin-bottom: .75rem;
+}
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: .3rem;
+  flex: 1;
+  min-width: 160px;
+}
+.form-group label { font-size: .8rem; color: var(--muted); font-weight: 600; }
+
+input[type="text"],
+input[type="number"],
+textarea,
+select {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: .9rem;
+  padding: .6rem .85rem;
+  outline: none;
+  transition: border-color .15s;
+  font-family: inherit;
+}
+input[type="text"]:focus,
+input[type="number"]:focus,
+textarea:focus { border-color: var(--primary); }
+input[type="text"]::placeholder,
+textarea::placeholder { color: var(--muted); }
+textarea { resize: vertical; min-height: 100px; }
+
+input[type="file"] {
+  color: var(--muted);
+  font-size: .85rem;
+  cursor: pointer;
+}
+input[type="file"]::file-selector-button {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+  font-size: .85rem;
+  margin-right: .75rem;
+  padding: .35rem .75rem;
+}
+
+.btn {
+  background: var(--primary);
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  cursor: pointer;
+  font-size: .9rem;
+  font-weight: 600;
+  padding: .65rem 1.25rem;
+  transition: background .15s, opacity .15s;
+  white-space: nowrap;
+}
+.btn:hover:not(:disabled) { background: var(--primary-h); }
+.btn:disabled { opacity: .4; cursor: not-allowed; }
+.btn-danger  { background: var(--danger); }
+.btn-danger:hover:not(:disabled)  { background: #f87171; }
+.btn-sm { font-size: .8rem; padding: .4rem .8rem; }
+.btn-ghost {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+.btn-ghost:hover:not(:disabled) { background: var(--surface2); color: var(--text); }
+
+.msg { font-size: .82rem; margin-top: .4rem; }
+.msg-ok  { color: var(--success); }
+.msg-err { color: var(--danger); }
+
+/* Candidates list */
+#candidates-list .candidate-row {
+  display: flex;
+  align-items: flex-start;
+  gap: .85rem;
+  padding: .85rem 0;
+  border-bottom: 1px solid var(--border);
+}
+#candidates-list .candidate-row:last-child { border-bottom: none; }
+
+.cand-thumb {
+  width: 64px; height: 48px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.cand-info { flex: 1; min-width: 0; }
+.cand-title { font-weight: 700; font-size: .95rem; }
+.cand-author { font-size: .78rem; color: var(--muted); margin-top: .15rem; }
+.cand-body-preview {
+  font-size: .8rem;
+  color: var(--muted);
+  margin-top: .3rem;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.cand-body-preview * { margin: 0; }
+.cand-actions { display: flex; gap: .4rem; align-items: center; flex-shrink: 0; }
+
+/* Image preview */
+#img-preview-wrap { margin-top: .5rem; display: none; }
+#img-preview {
+  max-width: 160px;
+  max-height: 120px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
+/* Settings row */
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.settings-row label { color: var(--text); font-weight: 600; font-size: .9rem; }
+#n-winners-input { width: 80px; text-align: center; }
+
+.note {
+  background: #1a1040;
+  border: 1px solid #3730a3;
+  border-radius: 8px;
+  color: #a5b4fc;
+  font-size: .82rem;
+  padding: .65rem .9rem;
+  margin-top: .75rem;
+}
+
+/* ── Password overlay ── */
+#pw-overlay {
+  position: fixed; inset: 0;
+  background: var(--bg);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 200;
+}
+#pw-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 2.5rem;
+  width: min(380px, 92vw);
+  text-align: center;
+}
+#pw-card h2 { font-size: 1.3rem; font-weight: 800; margin-bottom: .4rem; color: var(--text); text-transform: none; letter-spacing: normal; }
+#pw-card p  { color: var(--muted); font-size: .9rem; margin-bottom: 1.5rem; }
+#pw-input   { width: 100%; margin-bottom: .75rem; }
+#pw-error   { color: var(--danger); font-size: .85rem; margin-bottom: .75rem; display: none; }
+</style>
+</head>
+<body>
+<div id="pw-overlay">
+  <div id="pw-card">
+    <h2>&#9670; Admin Access</h2>
+    <p>Enter the admin password to continue.</p>
+    <input type="password" id="pw-input" placeholder="Password" autocomplete="current-password">
+    <div id="pw-error">Wrong password — try again.</div>
+    <button class="btn" id="pw-submit-btn" style="width:100%">Unlock</button>
+  </div>
+</div>
+
+<header>
+  <h1 id="admin-page-title">&#9670; STAR Voting Admin</h1>
+  <a href="/">&#8592; Voter Page</a>
+</header>
+
+<main>
+
+  <!-- Settings -->
+  <div class="card">
+    <h2>Election Settings</h2>
+    <div class="settings-row" style="margin-bottom:.9rem">
+      <label for="election-title-input" style="white-space:nowrap">Election Title:</label>
+      <input type="text" id="election-title-input" placeholder="e.g. Team Outing Vote" style="flex:1;min-width:180px">
+    </div>
+    <div class="settings-row" style="margin-bottom:.9rem">
+      <label>Voting Mode:</label>
+      <label style="font-weight:400;display:flex;align-items:center;gap:.4rem;cursor:pointer">
+        <input type="radio" name="voting-mode" id="mode-star" value="star" checked>
+        STAR Voting <span style="color:var(--muted);font-size:.8rem">(sequential, runoff each round)</span>
+      </label>
+      <label style="font-weight:400;display:flex;align-items:center;gap:.4rem;cursor:pointer">
+        <input type="radio" name="voting-mode" id="mode-score" value="score">
+        Multi-Winner Score <span style="color:var(--muted);font-size:.8rem">(single round, top-N by score)</span>
+      </label>
+    </div>
+    <div class="settings-row">
+      <label for="n-winners-input">Number of Winners (N):</label>
+      <input type="number" id="n-winners-input" min="1" value="1">
+      <button class="btn" id="save-settings-btn">Save</button>
+      <span class="msg" id="settings-msg"></span>
+    </div>
+    <div class="note">
+      Mason Hieb controls Reveal Winner and Reset Election from the voter page after logging in as <strong>Mason Hieb</strong>.
+    </div>
+  </div>
+
+  <!-- Add candidate -->
+  <div class="card">
+    <h2>Add Candidate</h2>
+    <div class="form-row">
+      <div class="form-group" style="flex:2">
+        <label for="cand-title">Title *</label>
+        <input type="text" id="cand-title" placeholder="Candidate title">
+      </div>
+      <div class="form-group">
+        <label for="cand-author">Author (optional)</label>
+        <input type="text" id="cand-author" placeholder="Author name">
+      </div>
+    </div>
+    <div class="form-group" style="margin-bottom:.75rem">
+      <label for="cand-body">Body (Markdown)</label>
+      <textarea id="cand-body" placeholder="Describe this candidate… supports **markdown**"></textarea>
+    </div>
+    <div class="form-group" style="margin-bottom:.75rem">
+      <label for="cand-image-file">Image (optional)</label>
+      <input type="file" id="cand-image-file" accept="image/*">
+      <div id="img-preview-wrap">
+        <img id="img-preview" src="" alt="Preview">
+      </div>
+    </div>
+    <input type="hidden" id="cand-image-path" value="">
+    <div style="display:flex;gap:.75rem;align-items:center;flex-wrap:wrap">
+      <button class="btn" id="add-cand-btn">Add Candidate</button>
+      <span class="msg" id="cand-msg"></span>
+    </div>
+  </div>
+
+  <!-- Candidate list -->
+  <div class="card">
+    <h2>Candidates</h2>
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem;margin-bottom:.75rem">
+      <span id="candidate-count" style="font-size:.82rem;color:var(--muted)"></span>
+      <div style="display:flex;gap:.5rem;align-items:center">
+        <button class="btn btn-ghost btn-sm" id="gen-test-btn" title="Only works when no candidates exist">&#9685; Generate Test Ballot (10)</button>
+        <button class="btn btn-danger btn-sm" id="clear-cands-btn" title="Requires no active votes — reset election first if needed">Clear All</button>
+        <span class="msg" id="gen-test-msg"></span>
+      </div>
+    </div>
+    <div id="candidates-list">
+      <span style="color:var(--muted);font-size:.9rem">Loading…</span>
+    </div>
+  </div>
+
+  <!-- Unsubmit ballot -->
+  <div class="card">
+    <h2>Unsubmit Ballot</h2>
+    <div style="display:flex;gap:.75rem;align-items:flex-end;flex-wrap:wrap">
+      <div class="form-group" style="flex:1;min-width:180px">
+        <label for="unsubmit-select">Voter (submitted this round)</label>
+        <select id="unsubmit-select"><option value="">— select a voter —</option></select>
+      </div>
+      <button class="btn btn-danger" id="unsubmit-btn" disabled>Unsubmit</button>
+    </div>
+    <span class="msg" id="unsubmit-msg" style="display:block;margin-top:.5rem"></span>
+  </div>
+
+  <!-- Election history -->
+  <div class="card">
+    <h2>Election History</h2>
+    <div id="history-list"><span style="color:var(--muted);font-size:.9rem">Loading…</span></div>
+  </div>
+
+</main>
+
+<script>
+// ── Admin password ─────────────────────────────────────────────────────────
+let adminPassword = null;
+
+async function tryUnlock(pw) {
+  const errEl = document.getElementById('pw-error');
+  errEl.style.display = 'none';
+  try {
+    const r = await fetch('/api/admin/login', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({password: pw})
+    });
+    if (r.ok) {
+      sessionStorage.setItem('adminPassword', pw);
+      adminPassword = pw;
+      document.getElementById('pw-overlay').style.display = 'none';
+      initAdmin();
+    } else {
+      errEl.style.display = '';
+      document.getElementById('pw-input').value = '';
+      document.getElementById('pw-input').focus();
+    }
+  } catch(e) {
+    errEl.textContent = 'Network error.';
+    errEl.style.display = '';
+  }
+}
+
+document.getElementById('pw-submit-btn').addEventListener('click', () => {
+  tryUnlock(document.getElementById('pw-input').value);
+});
+document.getElementById('pw-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') tryUnlock(document.getElementById('pw-input').value);
+});
+
+const savedPw = sessionStorage.getItem('adminPassword');
+if (savedPw) {
+  tryUnlock(savedPw);
+} else {
+  document.getElementById('pw-input').focus();
+}
+
+function initAdmin() {
+  loadSettings();
+  loadCandidates();
+  loadHistory();
+  loadVotersForUnsubmit();
+}
+
+// ── Settings ───────────────────────────────────────────────────────────────
+async function loadSettings() {
+  try {
+    const r = await fetch('/api/state');
+    const s = await r.json();
+    document.getElementById('n-winners-input').value = s.n_winners || 1;
+    const mode = s.voting_mode || 'star';
+    document.querySelector(`input[name="voting-mode"][value="${mode}"]`).checked = true;
+    document.getElementById('election-title-input').value = s.election_title || '';
+    const isScore = mode === 'score';
+    const label = isScore ? 'Multi-Winner Score Voting Admin' : 'STAR Voting Admin';
+    document.getElementById('admin-page-title').textContent = `\u25C6 ${label}`;
+    document.title = label;
+  } catch(e) {}
+}
+
+document.getElementById('save-settings-btn').addEventListener('click', async () => {
+  const n     = parseInt(document.getElementById('n-winners-input').value);
+  const mode  = document.querySelector('input[name="voting-mode"]:checked').value;
+  const title = document.getElementById('election-title-input').value.trim();
+  const msg   = document.getElementById('settings-msg');
+  if (!n || n < 1) { showMsg(msg, 'Must be ≥ 1', false); return; }
+  try {
+    const r = await fetch('/api/admin/settings', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({voter_name: 'Mason Hieb', n_winners: n, voting_mode: mode, election_title: title})
+    });
+    const d = await r.json();
+    showMsg(msg, r.ok ? 'Saved!' : (d.error || 'Error'), r.ok);
+  } catch(e) { showMsg(msg, 'Network error', false); }
+});
+
+// ── Candidates ─────────────────────────────────────────────────────────────
+function esc(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function showMsg(el, text, ok) {
+  el.textContent = text;
+  el.className = 'msg ' + (ok ? 'msg-ok' : 'msg-err');
+  setTimeout(() => { el.textContent = ''; el.className = 'msg'; }, 4000);
+}
+
+async function loadCandidates() {
+  try {
+    const r = await fetch('/api/candidates');
+    const candidates = await r.json();
+    const countEl = document.getElementById('candidate-count');
+    countEl.textContent = candidates.length === 0 ? 'No candidates yet' : `${candidates.length} candidate${candidates.length !== 1 ? 's' : ''}`;
+    document.getElementById('gen-test-btn').disabled = candidates.length > 0;
+    const list = document.getElementById('candidates-list');
+    if (candidates.length === 0) {
+      list.innerHTML = '<span style="color:var(--muted);font-size:.9rem">No candidates yet.</span>';
+      return;
+    }
+    list.innerHTML = candidates.map(c => {
+      const img = c.image_url
+        ? `<img class="cand-thumb" src="${esc(c.image_url)}" alt="${esc(c.title)}">`
+        : `<div style="width:64px;height:48px;background:var(--surface2);border-radius:6px;border:1px solid var(--border);flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:.7rem">No img</div>`;
+      const author = c.author ? `<div class="cand-author">by ${esc(c.author)}</div>` : '';
+      return `<div class="candidate-row" data-id="${c.id}">
+        ${img}
+        <div class="cand-info">
+          <div class="cand-title">${esc(c.title)}</div>
+          ${author}
+          <div class="cand-body-preview">${c.body_html}</div>
+        </div>
+        <div class="cand-actions">
+          <button class="btn btn-sm btn-danger delete-btn" data-id="${c.id}" title="Delete">Delete</button>
+        </div>
+      </div>`;
+    }).join('');
+
+    list.querySelectorAll('.delete-btn').forEach(btn => {
+      btn.addEventListener('click', () => deleteCandidate(parseInt(btn.dataset.id)));
+    });
+  } catch(e) {
+    document.getElementById('candidates-list').innerHTML =
+      '<span style="color:var(--danger)">Failed to load candidates.</span>';
+  }
+}
+
+async function deleteCandidate(id) {
+  if (!confirm('Delete this candidate?')) return;
+  try {
+    const r = await fetch(`/api/admin/candidates/${id}`, {method: 'DELETE'});
+    const d = await r.json();
+    if (!r.ok) { alert(d.error || 'Delete failed.'); return; }
+    loadCandidates();
+  } catch(e) { alert('Network error.'); }
+}
+
+// ── Image upload ───────────────────────────────────────────────────────────
+document.getElementById('cand-image-file').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const form = new FormData();
+  form.append('image', file);
+  try {
+    const r = await fetch('/api/admin/upload-image', {method: 'POST', body: form});
+    const d = await r.json();
+    if (!r.ok) { alert(d.error || 'Upload failed.'); return; }
+    document.getElementById('cand-image-path').value = d.filename;
+    const preview = document.getElementById('img-preview');
+    preview.src = d.url;
+    document.getElementById('img-preview-wrap').style.display = '';
+  } catch(e) { alert('Upload failed.'); }
+});
+
+// ── Add candidate ──────────────────────────────────────────────────────────
+document.getElementById('add-cand-btn').addEventListener('click', async () => {
+  const title      = document.getElementById('cand-title').value.trim();
+  const body       = document.getElementById('cand-body').value.trim();
+  const author     = document.getElementById('cand-author').value.trim();
+  const image_path = document.getElementById('cand-image-path').value.trim();
+  const msg        = document.getElementById('cand-msg');
+
+  if (!title) { showMsg(msg, 'Title is required.', false); return; }
+
+  try {
+    const r = await fetch('/api/admin/candidates', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({title, body, author: author || null, image_path: image_path || null})
+    });
+    const d = await r.json();
+    if (!r.ok) { showMsg(msg, d.error || 'Error', false); return; }
+    showMsg(msg, 'Candidate added!', true);
+    document.getElementById('cand-title').value  = '';
+    document.getElementById('cand-body').value   = '';
+    document.getElementById('cand-author').value = '';
+    document.getElementById('cand-image-path').value = '';
+    document.getElementById('cand-image-file').value = '';
+    document.getElementById('img-preview-wrap').style.display = 'none';
+    loadCandidates();
+  } catch(e) { showMsg(msg, 'Network error.', false); }
+});
+
+// ── Init ───────────────────────────────────────────────────────────────────
+// ── Generate test ballot ────────────────────────────────────────────────────
+document.getElementById('gen-test-btn').addEventListener('click', async () => {
+  const msg = document.getElementById('gen-test-msg');
+  document.getElementById('gen-test-btn').disabled = true;
+  try {
+    const r = await fetch('/api/admin/generate-test', {method: 'POST'});
+    const d = await r.json();
+    if (!r.ok) { showMsg(msg, d.error || 'Error', false); document.getElementById('gen-test-btn').disabled = false; return; }
+    showMsg(msg, `Generated ${d.count} candidates!`, true);
+    loadCandidates();
+  } catch(e) { showMsg(msg, 'Network error', false); document.getElementById('gen-test-btn').disabled = false; }
+});
+
+document.getElementById('clear-cands-btn').addEventListener('click', async () => {
+  if (!confirm('Clear all candidates? This cannot be undone. The election must have no active votes.')) return;
+  const msg = document.getElementById('gen-test-msg');
+  try {
+    const r = await fetch('/api/admin/clear-candidates', {method: 'POST'});
+    const d = await r.json();
+    if (!r.ok) { showMsg(msg, d.error || 'Error', false); return; }
+    showMsg(msg, 'Candidates cleared.', true);
+    loadCandidates();
+  } catch(e) { showMsg(msg, 'Network error', false); }
+});
+
+// ── Election history ────────────────────────────────────────────────────────
+function fmtDate(ts) {
+  if (!ts) return '';
+  const d = new Date(ts.endsWith('Z') ? ts : ts + 'Z');
+  return d.toLocaleDateString(undefined, {year:'numeric', month:'short', day:'numeric'});
+}
+
+async function loadHistory() {
+  const el = document.getElementById('history-list');
+  try {
+    const r = await fetch('/api/admin/elections');
+    const elections = await r.json();
+    if (!elections.length) {
+      el.innerHTML = '<span style="color:var(--muted);font-size:.9rem">No completed elections yet.</span>';
+      return;
+    }
+    el.innerHTML = elections.slice().reverse().map(e => {
+      const modeLabel = e.voting_mode === 'score' ? 'Multi-winner score' : 'Sequential STAR';
+      const resultsHtml = e.results.map(res => {
+        let detail = `<span style="color:var(--muted);font-size:.8rem">Score: ${res.total_score}</span>`;
+        if (res.finalist1_title) {
+          detail += ` &nbsp;·&nbsp; <span style="color:var(--muted);font-size:.8rem">Runoff: ${esc(res.finalist1_title)} ${res.finalist1_runoff_votes} vs ${esc(res.finalist2_title)} ${res.finalist2_runoff_votes}</span>`;
+        }
+        const place = res.place === 1 ? '🥇' : res.place === 2 ? '🥈' : res.place === 3 ? '🥉' : `#${res.place}`;
+        return `<div style="display:flex;align-items:baseline;gap:.6rem;padding:.35rem 0;border-bottom:1px solid var(--border)">
+          <span style="font-size:1rem;min-width:1.6rem">${place}</span>
+          <span style="flex:1;font-weight:500">${esc(res.candidate_title)}</span>
+          ${detail}
+        </div>`;
+      }).join('');
+      return `<div style="margin-bottom:1.4rem">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:.4rem">
+          <span style="font-weight:600;font-size:1.05rem">${esc(e.title)}</span>
+          <span style="color:var(--muted);font-size:.8rem">${fmtDate(e.completed_at)}</span>
+        </div>
+        <div style="color:var(--muted);font-size:.8rem;margin-bottom:.5rem">${esc(modeLabel)} · ${e.n_winners} winner${e.n_winners !== 1 ? 's' : ''}</div>
+        <div>${resultsHtml}</div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    el.innerHTML = '<span style="color:var(--danger);font-size:.9rem">Failed to load history.</span>';
+  }
+}
+
+// ── Unsubmit ballot ─────────────────────────────────────────────────────────
+async function loadVotersForUnsubmit() {
+  const sel = document.getElementById('unsubmit-select');
+  try {
+    const r = await fetch('/api/voters');
+    const voters = await r.json();
+    const submitted = voters.filter(v => v.voted);
+    sel.innerHTML = '<option value="">— select a voter —</option>' +
+      submitted.map(v => `<option value="${v.id}">${esc(v.name)}</option>`).join('');
+    document.getElementById('unsubmit-btn').disabled = submitted.length === 0;
+  } catch(e) {}
+}
+
+document.getElementById('unsubmit-select').addEventListener('change', e => {
+  document.getElementById('unsubmit-btn').disabled = !e.target.value;
+});
+
+document.getElementById('unsubmit-btn').addEventListener('click', async () => {
+  const sel = document.getElementById('unsubmit-select');
+  const voterId = sel.value;
+  const voterName = sel.options[sel.selectedIndex]?.text || 'this voter';
+  if (!voterId) return;
+  if (!confirm(`Unsubmit the ballot for ${voterName}?`)) return;
+  const msg = document.getElementById('unsubmit-msg');
+  try {
+    const r = await fetch('/api/admin/unsubmit', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({admin_password: adminPassword, voter_id: parseInt(voterId)})
+    });
+    const d = await r.json();
+    if (!r.ok) { showMsg(msg, d.error || 'Error', false); return; }
+    showMsg(msg, `Ballot unsubmitted for ${voterName}.`, true);
+    loadVotersForUnsubmit();
+  } catch(e) { showMsg(msg, 'Network error', false); }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,1060 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>STAR Voting</title>
+<style>
+:root {
+  --bg:       #0f172a;
+  --surface:  #1e293b;
+  --surface2: #263248;
+  --border:   #334155;
+  --text:     #e2e8f0;
+  --muted:    #94a3b8;
+  --primary:  #6366f1;
+  --primary-h:#818cf8;
+  --star:     #f59e0b;
+  --star-h:   #fcd34d;
+  --success:  #10b981;
+  --danger:   #ef4444;
+  --warn:     #f59e0b;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+/* ── Name entry overlay ─────────────────────────────────────── */
+#name-overlay {
+  position: fixed; inset: 0;
+  background: var(--bg);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 100;
+}
+#name-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 2.5rem;
+  width: min(420px, 92vw);
+  text-align: center;
+}
+#name-card h1 { font-size: 1.6rem; margin-bottom: .35rem; color: var(--text); }
+#name-card p  { color: var(--muted); margin-bottom: 1.5rem; font-size: .9rem; }
+
+.input-group { display: flex; flex-direction: column; gap: .75rem; }
+input[type="text"] {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 1rem;
+  padding: .7rem 1rem;
+  outline: none;
+  transition: border-color .15s;
+}
+input[type="text"]:focus { border-color: var(--primary); }
+input[type="text"]::placeholder { color: var(--muted); }
+
+select {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 1rem;
+  padding: .7rem 1rem;
+  outline: none;
+  cursor: pointer;
+}
+select option { background: var(--surface2); }
+
+.btn {
+  background: var(--primary);
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: 600;
+  padding: .75rem 1.5rem;
+  transition: background .15s, opacity .15s;
+}
+.btn:hover:not(:disabled) { background: var(--primary-h); }
+.btn:disabled { opacity: .4; cursor: not-allowed; }
+.btn-danger { background: var(--danger); }
+.btn-danger:hover:not(:disabled) { background: #f87171; }
+.btn-sm { font-size: .85rem; padding: .45rem .9rem; }
+.btn-outline {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+.btn-outline:hover:not(:disabled) { background: var(--surface2); color: var(--text); }
+
+.error-msg { color: var(--danger); font-size: .85rem; margin-top: .5rem; }
+.divider { color: var(--muted); font-size: .8rem; margin: .5rem 0; }
+
+/* ── App shell ───────────────────────────────────────────────── */
+#app { display: none; flex-direction: column; min-height: 100vh; }
+#app.visible { display: flex; }
+
+header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 1rem 1.5rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  flex-wrap: wrap;
+}
+#site-title {
+  font-size: .75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  color: var(--muted);
+  margin-bottom: .2rem;
+  transition: color .3s;
+}
+
+#greeting {
+  font-size: clamp(1.4rem, 4vw, 2rem);
+  font-weight: 800;
+  letter-spacing: .05em;
+  color: var(--text);
+}
+#greeting span { color: var(--primary-h); }
+
+#round-badge {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: .35rem .9rem;
+  font-size: .8rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* ── Mason controls bar ──────────────────────────────────────── */
+#mason-bar {
+  display: none;
+  background: #1a1040;
+  border-bottom: 1px solid #3730a3;
+  padding: .75rem 1.5rem;
+  gap: .75rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+#mason-bar.visible { display: flex; }
+#mason-bar span { color: #a5b4fc; font-size: .85rem; font-weight: 600; flex: 1; }
+
+/* ── Main layout ─────────────────────────────────────────────── */
+#content {
+  display: grid;
+  grid-template-columns: 1fr 280px;
+  gap: 1.25rem;
+  padding: 1.25rem;
+  flex: 1;
+  align-items: start;
+}
+@media (max-width: 760px) {
+  #content { grid-template-columns: 1fr; }
+  #sidebar { order: -1; }
+}
+
+/* ── Voting area ─────────────────────────────────────────────── */
+#voting-area h2 {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  margin-bottom: 1rem;
+}
+
+.candidate-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin-bottom: 1rem;
+  overflow: hidden;
+  transition: border-color .2s;
+}
+.candidate-card.scored { border-color: var(--success); }
+.candidate-card.unscored-warn { border-color: var(--warn); }
+
+.candidate-top {
+  display: flex;
+  gap: 1rem;
+  padding: 1.1rem 1.2rem 0;
+}
+.candidate-img {
+  width: 120px;
+  height: 90px;
+  object-fit: cover;
+  border-radius: 8px;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+}
+.candidate-meta { flex: 1; min-width: 0; }
+.candidate-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin-bottom: .2rem;
+}
+.candidate-author {
+  font-size: .8rem;
+  color: var(--muted);
+  margin-bottom: .6rem;
+}
+.candidate-body {
+  font-size: .9rem;
+  color: var(--muted);
+  line-height: 1.6;
+  padding: .6rem 1.2rem 0;
+}
+.candidate-body p { margin-bottom: .4rem; }
+.candidate-body p:last-child { margin-bottom: 0; }
+.candidate-body a { color: var(--primary-h); }
+.candidate-body code {
+  background: var(--surface2);
+  border-radius: 4px;
+  padding: .1em .35em;
+  font-size: .85em;
+}
+
+/* Star rating */
+.scoring-row {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  padding: .9rem 1.2rem;
+  border-top: 1px solid var(--border);
+  margin-top: .75rem;
+}
+.scoring-label {
+  font-size: .8rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.score-selector {
+  display: flex;
+  gap: .3rem;
+  flex-wrap: wrap;
+}
+.score-btn {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: .85rem;
+  font-weight: 600;
+  letter-spacing: .02em;
+  padding: .4rem .55rem;
+  transition: background .1s, color .1s, border-color .1s;
+  min-width: 36px;
+  text-align: center;
+}
+.score-btn:hover { background: var(--surface); color: var(--star-h); border-color: var(--star); }
+.score-btn.selected {
+  background: var(--star);
+  border-color: var(--star);
+  color: #0f172a;
+}
+.score-btn[data-score="0"].selected {
+  background: var(--surface2);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.score-current {
+  font-size: .8rem;
+  color: var(--muted);
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+/* ── Submit section ──────────────────────────────────────────── */
+#submit-section {
+  padding: .25rem 0 1.5rem;
+}
+#submit-info {
+  font-size: .85rem;
+  color: var(--muted);
+  margin-bottom: .75rem;
+}
+#submit-info.warn { color: var(--warn); }
+#submitted-notice {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 3rem 2rem;
+  text-align: center;
+}
+#submitted-notice .submitted-check {
+  font-size: 4rem;
+  color: var(--success);
+  line-height: 1;
+}
+#submitted-notice .submitted-heading {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--success);
+  letter-spacing: .02em;
+}
+#submitted-notice .submitted-sub {
+  color: var(--muted);
+  font-size: 1rem;
+}
+#election-complete-banner {
+  display: none;
+  background: #1a1040;
+  border: 1px solid var(--primary);
+  border-radius: 12px;
+  padding: 1.5rem;
+  text-align: center;
+}
+#election-complete-banner h2 { color: var(--primary-h); font-size: 1.4rem; margin-bottom: .4rem; }
+#election-complete-banner p  { color: var(--muted); font-size: .9rem; }
+
+/* ── Sidebar ─────────────────────────────────────────────────── */
+#sidebar { display: flex; flex-direction: column; gap: 1rem; }
+
+.sidebar-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1rem;
+}
+.sidebar-card h3 {
+  font-size: .8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--muted);
+  margin-bottom: .75rem;
+}
+.sidebar-stat {
+  font-size: .85rem;
+  color: var(--muted);
+  margin-bottom: .5rem;
+}
+.sidebar-stat strong { color: var(--text); }
+
+.voter-item {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .35rem 0;
+  border-bottom: 1px solid var(--border);
+  font-size: .88rem;
+}
+.voter-item:last-child { border-bottom: none; }
+.voter-name { flex: 1; }
+.voter-status { display: flex; align-items: center; gap: .35rem; }
+
+.dot-active {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--primary);
+  display: inline-block;
+}
+.check-voted { color: var(--success); font-size: 1rem; }
+.dot-pending { color: var(--muted); font-size: .9rem; }
+
+/* Winners list in sidebar */
+.winner-item {
+  padding: .5rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.winner-item:last-child { border-bottom: none; }
+.winner-rank {
+  font-size: .7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--primary-h);
+}
+.winner-title { font-size: .95rem; font-weight: 600; margin: .1rem 0; }
+.winner-score { font-size: .75rem; color: var(--muted); }
+
+/* ── Winner overlay ──────────────────────────────────────────── */
+#winner-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.85);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  padding: 1rem;
+}
+#winner-overlay.visible { display: flex; }
+
+#winner-card {
+  background: var(--surface);
+  border: 1px solid var(--primary);
+  border-radius: 20px;
+  max-width: 560px;
+  width: 100%;
+  padding: 2.5rem;
+  text-align: center;
+  animation: popIn .35s cubic-bezier(.34,1.56,.64,1);
+  max-height: 90vh;
+  overflow-y: auto;
+}
+@keyframes popIn {
+  from { transform: scale(.7); opacity: 0; }
+  to   { transform: scale(1);  opacity: 1; }
+}
+
+#winner-card .overlay-label {
+  font-size: .8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  color: var(--primary-h);
+  margin-bottom: .5rem;
+}
+#winner-card .winner-name {
+  font-size: clamp(1.4rem, 5vw, 2.2rem);
+  font-weight: 800;
+  margin-bottom: 1.5rem;
+  color: var(--text);
+}
+#winner-card .scores-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 1.5rem;
+  text-align: left;
+  font-size: .85rem;
+}
+#winner-card .scores-table th {
+  color: var(--muted);
+  font-weight: 600;
+  padding: .4rem .6rem;
+  border-bottom: 1px solid var(--border);
+}
+#winner-card .scores-table td {
+  padding: .45rem .6rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+}
+#winner-card .scores-table tr:last-child td { border-bottom: none; }
+#winner-card .scores-table .highlight td { color: var(--star); }
+
+#winner-card .runoff-info {
+  background: var(--surface2);
+  border-radius: 8px;
+  padding: .75rem 1rem;
+  font-size: .82rem;
+  color: var(--muted);
+  margin-bottom: 1.5rem;
+  text-align: left;
+}
+#winner-card .runoff-info strong { color: var(--text); }
+</style>
+</head>
+<body>
+
+<!-- Name entry overlay -->
+<div id="name-overlay">
+  <div id="name-card">
+    <h1 id="name-card-title">STAR Voting Tool</h1>
+    <p>Enter your full name to participate, or select your name if you've voted before.</p>
+    <div class="input-group">
+      <div style="display:flex;gap:.6rem;min-width:0">
+        <input type="text" id="first-name-input" placeholder="First name" autocomplete="given-name" style="flex:1;min-width:0">
+        <input type="text" id="last-name-input"  placeholder="Last name"  autocomplete="family-name" style="flex:1;min-width:0">
+      </div>
+      <div id="name-error" class="error-msg" style="display:none"></div>
+      <button class="btn" id="name-submit-btn">Join</button>
+      <div class="divider">— or select your name —</div>
+      <select id="name-select">
+        <option value="">Loading…</option>
+      </select>
+      <button class="btn btn-outline" id="name-pick-btn">Continue as selected</button>
+    </div>
+  </div>
+</div>
+
+<!-- Main app -->
+<div id="app">
+  <header>
+    <div>
+      <div id="site-title">STAR Voting Tool</div>
+      <div id="greeting">HELLO <span id="greeting-name"></span></div>
+    </div>
+    <div id="round-badge">Round 1</div>
+    <button id="logout-btn" class="btn btn-outline btn-sm">Switch User</button>
+  </header>
+
+  <!-- Mason controls bar -->
+  <div id="mason-bar">
+    <span>&#9670; Mason Controls</span>
+    <button class="btn btn-sm" id="reveal-btn">Reveal Winner</button>
+    <button class="btn btn-sm btn-danger" id="reset-btn">Reset Election</button>
+  </div>
+
+  <div id="content">
+    <!-- Voting area -->
+    <div id="voting-area">
+      <h2 id="vote-heading">Cast Your Ballot</h2>
+      <div id="candidates-list"></div>
+      <div id="submit-section">
+        <div id="submitted-notice">
+          <div class="submitted-check">&#10003;</div>
+          <div class="submitted-heading">Ballot Submitted</div>
+          <div class="submitted-sub">There is nothing more you need to do at this moment</div>
+        </div>
+        <div id="submit-info"></div>
+        <button class="btn" id="submit-btn" style="display:none">Submit Ballot</button>
+        <div id="election-complete-banner">
+          <h2>Election Complete</h2>
+          <p>All winners have been selected. See the results in the sidebar.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sidebar -->
+    <div id="sidebar">
+      <div class="sidebar-card" id="voters-card">
+        <h3>Voters</h3>
+        <div class="sidebar-stat" id="vote-count-stat"></div>
+        <div id="voters-list"></div>
+      </div>
+      <div class="sidebar-card" id="winners-card" style="display:none">
+        <h3>Winners</h3>
+        <div id="winners-list"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Winner overlay -->
+<div id="winner-overlay">
+  <div id="winner-card">
+    <div class="overlay-label" id="overlay-label">Round 1 Winner</div>
+    <div class="winner-name" id="overlay-winner-name"></div>
+    <table class="scores-table" id="overlay-scores-table">
+      <thead><tr><th>Candidate</th><th>Total Score</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <div class="runoff-info" id="overlay-runoff-info"></div>
+    <button class="btn" id="overlay-close-btn">Continue</button>
+  </div>
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+let voterFirstName = localStorage.getItem('voter_first_name') || null;
+let voterLastName  = localStorage.getItem('voter_last_name')  || null;
+let voterName      = (voterFirstName && voterLastName) ? `${voterFirstName} ${voterLastName}` : null;
+let voterId        = localStorage.getItem('voter_id')   || null;
+let isMason        = localStorage.getItem('is_mason') === 'true';
+let scores       = {};          // { candidateId(int): score(int) }
+let state        = null;
+let prevWinCount = 0;
+let eventSource  = null;
+let hasSubmitted = false;       // submitted for current round
+
+// ── Utility ────────────────────────────────────────────────────────────────
+function esc(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function ordinal(n) {
+  const s = ['th','st','nd','rd'];
+  const v = n % 100;
+  return n + (s[(v-20)%10] || s[v] || s[0]);
+}
+
+// ── Name entry ─────────────────────────────────────────────────────────────
+async function loadExistingVoters() {
+  try {
+    const r = await fetch('/api/voters');
+    const voters = await r.json();
+    const sel = document.getElementById('name-select');
+    if (voters.length === 0) {
+      sel.innerHTML = '<option value="">No names yet — be the first!</option>';
+    } else {
+      sel.innerHTML = '<option value="">— pick a name —</option>' +
+        voters.map(v => `<option value="${esc(v.name)}">${esc(v.name)}</option>`).join('');
+    }
+  } catch(e) { /* ignore */ }
+}
+
+async function submitName(first, last) {
+  document.getElementById('name-error').style.display = 'none';
+  try {
+    const r = await fetch('/api/register', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({first_name: first, last_name: last})
+    });
+    const data = await r.json();
+    if (!r.ok) { showErr(data.error || 'Registration failed.'); return; }
+    localStorage.setItem('voter_first_name', data.first_name);
+    localStorage.setItem('voter_last_name',  data.last_name);
+    localStorage.setItem('voter_id',         data.id);
+    localStorage.setItem('is_mason',         data.is_mason ? 'true' : 'false');
+    voterFirstName = data.first_name;
+    voterLastName  = data.last_name;
+    voterName      = data.name;
+    voterId        = data.id;
+    isMason        = data.is_mason;
+    enterApp();
+  } catch(e) { showErr('Network error.'); }
+}
+
+function showErr(msg) {
+  const el = document.getElementById('name-error');
+  el.textContent = msg;
+  el.style.display = '';
+}
+
+document.getElementById('name-submit-btn').addEventListener('click', () => {
+  const first = document.getElementById('first-name-input').value.trim();
+  const last  = document.getElementById('last-name-input').value.trim();
+  if (!first || !last) { showErr('Please enter both first and last name.'); return; }
+  submitName(first, last);
+});
+['first-name-input','last-name-input'].forEach(id => {
+  document.getElementById(id).addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('name-submit-btn').click();
+  });
+});
+document.getElementById('name-pick-btn').addEventListener('click', () => {
+  const v = document.getElementById('name-select').value;
+  if (!v) return;
+  const spaceIdx = v.indexOf(' ');
+  const first = spaceIdx >= 0 ? v.slice(0, spaceIdx) : v;
+  const last  = spaceIdx >= 0 ? v.slice(spaceIdx + 1) : '';
+  submitName(first, last);
+});
+
+// ── Enter app ──────────────────────────────────────────────────────────────
+async function enterApp() {
+  document.getElementById('name-overlay').style.display = 'none';
+  document.getElementById('app').classList.add('visible');
+  document.getElementById('greeting-name').textContent = voterName.toUpperCase();
+  if (isMason) document.getElementById('mason-bar').classList.add('visible');
+  // Pre-load any existing scores (restores ballot after admin unsubmit + page refresh)
+  try {
+    const r = await fetch('/api/my-scores?voter_name=' + encodeURIComponent(voterName));
+    if (r.ok) {
+      const existing = await r.json();
+      for (const [cid, score] of Object.entries(existing)) {
+        scores[cid] = score;
+      }
+    }
+  } catch(e) {}
+  connectSSE();
+}
+
+// ── SSE ────────────────────────────────────────────────────────────────────
+function connectSSE() {
+  if (eventSource) eventSource.close();
+  const url = '/api/stream?voter_name=' + encodeURIComponent(voterName);
+  eventSource = new EventSource(url);
+
+  eventSource.addEventListener('state', e => {
+    state = JSON.parse(e.data);
+    prevWinCount = state.winners.length;
+    detectSubmitted();
+    renderAll();
+  });
+
+  eventSource.addEventListener('state_update', e => {
+    const newState = JSON.parse(e.data);
+    const newWinCount = newState.winners.length;
+    const isNewRound = newState.round_number !== state?.round_number;
+    state = newState;
+
+    if (isNewRound) {
+      scores = {};
+      hasSubmitted = false;
+    }
+    detectSubmitted();
+
+    if (newWinCount > prevWinCount) {
+      if (state.voting_mode === 'score' && newWinCount === state.n_winners && prevWinCount === 0) {
+        showScoreWinnersOverlay(state.winners);
+      } else {
+        showWinnerOverlay(state.winners[newWinCount - 1]);
+      }
+    }
+    prevWinCount = newWinCount;
+    renderAll();
+  });
+
+  eventSource.addEventListener('voters_update', e => {
+    if (state) {
+      state.voters = JSON.parse(e.data);
+      renderVoters();
+    }
+  });
+
+  eventSource.onerror = () => {
+    setTimeout(connectSSE, 3000);
+  };
+}
+
+function detectSubmitted() {
+  if (!state || !voterId) return;
+  const me = state.voters.find(v => String(v.id) === String(voterId));
+  hasSubmitted = me ? me.voted : false;
+}
+
+// ── Rendering ──────────────────────────────────────────────────────────────
+function renderAll() {
+  if (!state) return;
+  renderRoundBadge();
+  renderCandidates();
+  renderVoters();
+  renderWinners();
+  renderSubmitSection();
+}
+
+function renderRoundBadge() {
+  const isScore = state.voting_mode === 'score';
+
+  // Titles
+  const modeTitle = isScore ? 'Multi-Winner Score Voting' : 'STAR Voting Tool';
+  document.getElementById('site-title').textContent = modeTitle;
+  document.title = modeTitle;
+
+  // Round badge
+  const el = document.getElementById('round-badge');
+  if (state.election_complete) {
+    el.textContent = 'Election Complete';
+    el.style.color = 'var(--success)';
+  } else if (isScore) {
+    el.textContent = `Top ${state.n_winners} — Single Round`;
+    el.style.color = '';
+  } else {
+    el.textContent = `Round ${state.round_number} of ${state.n_winners}`;
+    el.style.color = '';
+  }
+
+  document.getElementById('vote-heading').textContent =
+    state.election_complete ? 'Final Results' : 'Cast Your Ballot';
+}
+
+function renderCandidates() {
+  const list = document.getElementById('candidates-list');
+  if (state.election_complete || hasSubmitted) {
+    list.innerHTML = '';
+    return;
+  }
+  if (state.candidates.length === 0) {
+    list.innerHTML = '<p style="color:var(--muted);padding:.5rem 0">No candidates yet.</p>';
+    return;
+  }
+  list.innerHTML = '';
+  state.candidates.forEach(c => list.appendChild(buildCandidateCard(c)));
+}
+
+function buildCandidateCard(c) {
+  const div = document.createElement('div');
+  div.className = 'candidate-card';
+  div.dataset.candidateId = c.id;
+
+  const img = c.image_url
+    ? `<img class="candidate-img" src="${esc(c.image_url)}" alt="${esc(c.title)}">`
+    : '';
+  const author = c.author
+    ? `<div class="candidate-author">by ${esc(c.author)}</div>`
+    : '';
+
+  div.innerHTML = `
+    <div class="candidate-top">
+      ${img}
+      <div class="candidate-meta">
+        <div class="candidate-title">${esc(c.title)}</div>
+        ${author}
+      </div>
+    </div>
+    <div class="candidate-body">${c.body_html}</div>
+    <div class="scoring-row">
+      <span class="scoring-label">Your score:</span>
+      <div class="score-selector">
+        <button class="score-btn" data-score="0" title="No support">&#10005;</button>
+        <button class="score-btn" data-score="1" title="1 star">&#9733;</button>
+        <button class="score-btn" data-score="2" title="2 stars">&#9733;&#9733;</button>
+        <button class="score-btn" data-score="3" title="3 stars">&#9733;&#9733;&#9733;</button>
+        <button class="score-btn" data-score="4" title="4 stars">&#9733;&#9733;&#9733;&#9733;</button>
+        <button class="score-btn" data-score="5" title="5 stars">&#9733;&#9733;&#9733;&#9733;&#9733;</button>
+      </div>
+      <span class="score-current" id="score-current-${c.id}">—</span>
+    </div>
+  `;
+
+  // Restore existing score
+  if (scores[c.id] !== undefined) applyScore(div, c.id, scores[c.id]);
+
+  div.querySelectorAll('.score-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const s = parseInt(btn.dataset.score);
+      scores[c.id] = s;
+      applyScore(div, c.id, s);
+      updateSubmitBtn();
+    });
+  });
+
+  return div;
+}
+
+function applyScore(card, cid, score) {
+  card.querySelectorAll('.score-btn').forEach(btn => {
+    btn.classList.toggle('selected', parseInt(btn.dataset.score) === score);
+  });
+  const labels = ['No support','1 star','2 stars','3 stars','4 stars','5 stars'];
+  const el = document.getElementById(`score-current-${cid}`);
+  if (el) el.textContent = labels[score] || '—';
+  card.classList.toggle('scored', true);
+  card.classList.remove('unscored-warn');
+}
+
+function updateSubmitBtn() {
+  if (!state) return;
+  const all = state.candidates.every(c => scores[c.id] !== undefined);
+  const btn = document.getElementById('submit-btn');
+  if (btn) btn.disabled = !all;
+  const info = document.getElementById('submit-info');
+  const missing = state.candidates.filter(c => scores[c.id] === undefined).length;
+  if (info) {
+    if (missing === 0) {
+      info.textContent = 'All candidates scored. Ready to submit!';
+      info.className = 'sidebar-stat';
+    } else {
+      info.textContent = `Score ${missing} more candidate${missing !== 1 ? 's' : ''} to submit.`;
+      info.className = 'sidebar-stat warn';
+    }
+  }
+}
+
+function renderSubmitSection() {
+  const notice   = document.getElementById('submitted-notice');
+  const submitBtn = document.getElementById('submit-btn');
+  const info     = document.getElementById('submit-info');
+  const banner   = document.getElementById('election-complete-banner');
+
+  if (state.election_complete) {
+    notice.style.display   = 'none';
+    submitBtn.style.display = 'none';
+    info.style.display     = 'none';
+    banner.style.display   = '';
+  } else if (hasSubmitted) {
+    notice.style.display   = 'flex';
+    submitBtn.style.display = 'none';
+    info.style.display     = 'none';
+    banner.style.display   = 'none';
+  } else {
+    notice.style.display   = 'none';
+    submitBtn.style.display = '';
+    info.style.display     = '';
+    banner.style.display   = 'none';
+    updateSubmitBtn();
+  }
+
+  // Mason reveal button state
+  if (isMason) {
+    document.getElementById('reveal-btn').disabled = state.election_complete;
+  }
+}
+
+function renderVoters() {
+  if (!state) return;
+  const voters   = state.voters || [];
+  const online   = voters.filter(v => v.active);
+  const voted    = online.filter(v => v.voted).length;
+  const total    = online.length;
+  document.getElementById('vote-count-stat').innerHTML =
+    `<strong>${voted}</strong> of <strong>${total}</strong> online voted this round`;
+
+  const list = document.getElementById('voters-list');
+  list.innerHTML = voters.map(v => {
+    const activeIndicator = v.active
+      ? `<span class="dot-active" title="Active"></span>`
+      : '';
+    const votedIndicator = v.voted
+      ? `<span class="check-voted" title="Voted">&#10003;</span>`
+      : `<span class="dot-pending" title="Not voted yet">&#8226;</span>`;
+    return `<div class="voter-item">
+      <span class="voter-name">${esc(v.name)}</span>
+      <span class="voter-status">${activeIndicator}${votedIndicator}</span>
+    </div>`;
+  }).join('');
+}
+
+function renderWinners() {
+  if (!state) return;
+  const card = document.getElementById('winners-card');
+  const list = document.getElementById('winners-list');
+  if (!state.winners || state.winners.length === 0) {
+    card.style.display = 'none';
+    return;
+  }
+  card.style.display = '';
+  list.innerHTML = state.winners.map(w => `
+    <div class="winner-item">
+      <div class="winner-rank">${ordinal(w.round_number)} place</div>
+      <div class="winner-title">${esc(w.candidate_title)}</div>
+      <div class="winner-score">Score: ${w.total_score}</div>
+    </div>
+  `).join('');
+}
+
+// ── Submit ballot ──────────────────────────────────────────────────────────
+document.getElementById('submit-btn').addEventListener('click', async () => {
+  if (!state) return;
+  const all = state.candidates.every(c => scores[c.id] !== undefined);
+  if (!all) {
+    state.candidates.forEach(c => {
+      if (scores[c.id] === undefined) {
+        const card = document.querySelector(`[data-candidate-id="${c.id}"]`);
+        if (card) card.classList.add('unscored-warn');
+      }
+    });
+    return;
+  }
+  document.getElementById('submit-btn').disabled = true;
+  try {
+    const r = await fetch('/api/vote', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({voter_name: voterName, scores})
+    });
+    const data = await r.json();
+    if (!r.ok) { alert(data.error || 'Failed to submit ballot.'); }
+    else { hasSubmitted = true; renderSubmitSection(); renderCandidates(); }
+  } catch(e) { alert('Network error.'); }
+  document.getElementById('submit-btn').disabled = false;
+});
+
+// ── Mason controls ─────────────────────────────────────────────────────────
+document.getElementById('reveal-btn').addEventListener('click', async () => {
+  document.getElementById('reveal-btn').disabled = true;
+  try {
+    const r = await fetch('/api/admin/reveal', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({voter_name: voterName})
+    });
+    const data = await r.json();
+    if (!r.ok) { alert(data.error || 'Failed to reveal winner.'); }
+  } catch(e) { alert('Network error.'); }
+  document.getElementById('reveal-btn').disabled = false;
+});
+
+document.getElementById('reset-btn').addEventListener('click', async () => {
+  if (!confirm('Reset the election? This will clear all votes and restart from Round 1. Candidates and voter names are kept.')) return;
+  try {
+    const r = await fetch('/api/admin/reset', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({voter_name: voterName})
+    });
+    const data = await r.json();
+    if (!r.ok) { alert(data.error || 'Failed to reset.'); }
+    else { scores = {}; hasSubmitted = false; }
+  } catch(e) { alert('Network error.'); }
+});
+
+// ── Winner overlay ─────────────────────────────────────────────────────────
+function showWinnerOverlay(winner) {
+  document.getElementById('overlay-label').textContent =
+    `${ordinal(winner.round_number)} Place Winner`;
+  document.getElementById('overlay-winner-name').textContent = winner.candidate_title;
+
+  const tbody = document.querySelector('#overlay-scores-table tbody');
+  tbody.innerHTML = (winner.all_scores || []).map(s => `
+    <tr class="${s.candidate_id === winner.candidate_id ? 'highlight' : ''}">
+      <td>${esc(s.title)}${s.candidate_id === winner.candidate_id ? ' &#9733;' : ''}</td>
+      <td>${s.score}</td>
+    </tr>
+  `).join('');
+
+  let runoffHtml = '';
+  if (winner.finalist1_title && winner.finalist2_title) {
+    runoffHtml = `<strong>Automatic Runoff:</strong>
+      ${esc(winner.finalist1_title)} <strong>${winner.finalist1_runoff_votes}</strong> vs
+      ${esc(winner.finalist2_title)} <strong>${winner.finalist2_runoff_votes}</strong> preferred votes`;
+  } else if (winner.finalist1_title) {
+    runoffHtml = `Only candidate: <strong>${esc(winner.finalist1_title)}</strong>`;
+  }
+  document.getElementById('overlay-runoff-info').innerHTML = runoffHtml;
+  document.getElementById('winner-overlay').classList.add('visible');
+}
+
+function showScoreWinnersOverlay(winners) {
+  // Score mode: all top-N revealed at once — show ranked list with scores table
+  document.getElementById('overlay-label').textContent = `Top ${winners.length} Results`;
+  document.getElementById('overlay-winner-name').textContent =
+    winners.map((w, i) => `${ordinal(i + 1)}: ${w.candidate_title}`).join('\n');
+  document.getElementById('overlay-winner-name').style.whiteSpace = 'pre-line';
+  document.getElementById('overlay-winner-name').style.fontSize = 'clamp(1rem, 3vw, 1.4rem)';
+
+  // Use shared all_scores from first winner entry (same for all in score mode)
+  const allScores = winners[0]?.all_scores || [];
+  const winnerIds = new Set(winners.map(w => w.candidate_id));
+  const tbody = document.querySelector('#overlay-scores-table tbody');
+  tbody.innerHTML = allScores.map(s => `
+    <tr class="${winnerIds.has(s.candidate_id) ? 'highlight' : ''}">
+      <td>${esc(s.title)}${winnerIds.has(s.candidate_id) ? ' &#9733;' : ''}</td>
+      <td>${s.score}</td>
+    </tr>
+  `).join('');
+
+  document.getElementById('overlay-runoff-info').innerHTML = '';
+  document.getElementById('winner-overlay').classList.add('visible');
+}
+
+document.getElementById('overlay-close-btn').addEventListener('click', () => {
+  document.getElementById('winner-overlay').classList.remove('visible');
+  // Reset any style overrides set by showScoreWinnersOverlay
+  const nameEl = document.getElementById('overlay-winner-name');
+  nameEl.style.whiteSpace = '';
+  nameEl.style.fontSize = '';
+});
+
+document.getElementById('logout-btn').addEventListener('click', () => {
+  localStorage.removeItem('voter_first_name');
+  localStorage.removeItem('voter_last_name');
+  localStorage.removeItem('voter_id');
+  localStorage.removeItem('is_mason');
+  if (eventSource) eventSource.close();
+  location.reload();
+});
+
+// ── Init ───────────────────────────────────────────────────────────────────
+async function init() {
+  // Fetch mode early so the sign-in page title is correct before login
+  try {
+    const r = await fetch('/api/state');
+    if (r.ok) {
+      const s = await r.json();
+      const isScore = s.voting_mode === 'score';
+      const title = isScore ? 'Multi-Winner Score Voting' : 'STAR Voting Tool';
+      document.getElementById('name-card-title').textContent = title;
+      document.title = title;
+    }
+  } catch(e) {}
+  loadExistingVoters();
+  if (voterName) {
+    enterApp();
+  } else {
+    document.getElementById('name-overlay').style.display = '';
+  }
+}
+init();
+</script>
+</body>
+</html>
