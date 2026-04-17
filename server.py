@@ -111,14 +111,14 @@ class VotingServer:
                 # The script is minified to a single line to avoid any
                 # whitespace/newline issues when injected into the <head>.
                 patch = (
-                    f'<script>!function(){{'
+                    f"<script>!function(){{"
                     f'var p="{prefix}";'
-                    f'var f=window.fetch;'
+                    f"var f=window.fetch;"
                     f'window.fetch=function(u,o){{return f(u&&u[0]==="/"?p+u:u,o);}};'
-                    f'var E=window.EventSource;'
+                    f"var E=window.EventSource;"
                     f'window.EventSource=function(u,o){{return new E(u&&u[0]==="/"?p+u:u,o);}};'
-                    f'window.EventSource.prototype=E.prototype;'
-                    f'}}();</script>'
+                    f"window.EventSource.prototype=E.prototype;"
+                    f"}}();</script>"
                 )
                 body = resp.text.replace(
                     "<head>", f'<head>\n  <base href="{prefix}/">\n  {patch}', 1
@@ -162,9 +162,7 @@ class VotingServer:
         first = parts[0] if parts else ""
         last = parts[1] if len(parts) > 1 else ""
         if not self._is_mason(first, last):
-            return web.json_response(
-                {"error": "Forbidden: Mason Hieb only"}, status=403
-            )
+            return web.json_response({"error": "Forbidden: admin only"}, status=403)
         return None
 
     # ── State building ────────────────────────────────────────────────────────
@@ -214,16 +212,14 @@ class VotingServer:
         ]
 
         winners_data = []
-        for w in db.execute(
-            """SELECT w.*, c.title  AS cand_title,
+        for w in db.execute("""SELECT w.*, c.title  AS cand_title,
                       f1.title AS f1_title,
                       f2.title AS f2_title
                FROM winners w
                JOIN candidates c  ON w.candidate_id  = c.id
                LEFT JOIN candidates f1 ON w.finalist1_id = f1.id
                LEFT JOIN candidates f2 ON w.finalist2_id = f2.id
-               ORDER BY w.round_number"""
-        ).fetchall():
+               ORDER BY w.round_number""").fetchall():
             raw = json.loads(w["all_scores"]) if w["all_scores"] else {}
             all_scores_list = []
             for cid_str, score in sorted(raw.items(), key=lambda x: -x[1]):
@@ -374,14 +370,16 @@ class VotingServer:
         r.add_get("/api/voters", self._get_voters)
         r.add_post("/api/register", self._register)
         r.add_post("/api/vote", self._vote)
-        r.add_get("/api/admin/sets",                         self._admin_get_sets)
-        r.add_post("/api/admin/sets",                        self._admin_create_set)
-        r.add_delete("/api/admin/sets/{id}",                 self._admin_delete_set)
-        r.add_post("/api/admin/sets/{id}/items",             self._admin_add_set_item)
-        r.add_delete("/api/admin/sets/{id}/items/{item_id}", self._admin_delete_set_item)
-        r.add_post("/api/admin/sets/{id}/save-current",      self._admin_save_current_to_set)
-        r.add_post("/api/admin/sets/{id}/load",              self._admin_load_set)
-        r.add_post("/api/admin/login",                       self._admin_login)
+        r.add_get("/api/admin/sets", self._admin_get_sets)
+        r.add_post("/api/admin/sets", self._admin_create_set)
+        r.add_delete("/api/admin/sets/{id}", self._admin_delete_set)
+        r.add_post("/api/admin/sets/{id}/items", self._admin_add_set_item)
+        r.add_delete(
+            "/api/admin/sets/{id}/items/{item_id}", self._admin_delete_set_item
+        )
+        r.add_post("/api/admin/sets/{id}/save-current", self._admin_save_current_to_set)
+        r.add_post("/api/admin/sets/{id}/load", self._admin_load_set)
+        r.add_post("/api/admin/login", self._admin_login)
         r.add_post("/api/admin/candidates", self._admin_add_candidate)
         r.add_delete("/api/admin/candidates/{id}", self._admin_delete_candidate)
         r.add_post("/api/admin/generate-test", self._admin_generate_test)
@@ -462,9 +460,9 @@ class VotingServer:
                     "body": c["body"],
                     "body_html": render_markdown(c["body"]),
                     "author": c["author"],
-                    "image_url": f"images/{c['image_path']}"
-                    if c["image_path"]
-                    else None,
+                    "image_url": (
+                        f"images/{c['image_path']}" if c["image_path"] else None
+                    ),
                 }
                 for c in rows
             ]
@@ -810,8 +808,7 @@ class VotingServer:
                 (title, voting_mode, n_winners),
             )
             election_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
-            for w in db.execute(
-                """SELECT w.round_number, w.total_score,
+            for w in db.execute("""SELECT w.round_number, w.total_score,
                           w.finalist1_runoff_votes, w.finalist2_runoff_votes,
                           w.all_scores,
                           c.title  AS cand_title,
@@ -821,8 +818,7 @@ class VotingServer:
                    JOIN candidates c  ON w.candidate_id  = c.id
                    LEFT JOIN candidates f1 ON w.finalist1_id = f1.id
                    LEFT JOIN candidates f2 ON w.finalist2_id = f2.id
-                   ORDER BY w.round_number"""
-            ).fetchall():
+                   ORDER BY w.round_number""").fetchall():
                 raw = json.loads(w["all_scores"]) if w["all_scores"] else {}
                 resolved = []
                 for cid_str, score in sorted(raw.items(), key=lambda x: -x[1]):
@@ -873,15 +869,13 @@ class VotingServer:
                     ),
                 )
 
-        db.executescript(
-            """
+        db.executescript("""
             DELETE FROM votes;
             DELETE FROM ballots;
             DELETE FROM winners;
             DELETE FROM rounds;
             INSERT INTO rounds (round_number, status) VALUES (1, 'voting');
-        """
-        )
+        """)
         db.commit()
         await self._broadcast("state_update", self._build_state(db))
         return web.json_response({"ok": True})
@@ -906,9 +900,9 @@ class VotingServer:
                         "finalist1_runoff_votes": r["finalist1_runoff_votes"],
                         "finalist2_title": r["finalist2_title"],
                         "finalist2_runoff_votes": r["finalist2_runoff_votes"],
-                        "all_scores": json.loads(r["all_scores"])
-                        if r["all_scores"]
-                        else [],
+                        "all_scores": (
+                            json.loads(r["all_scores"]) if r["all_scores"] else []
+                        ),
                     }
                 )
             ballots: dict[str, list] = {}
@@ -938,11 +932,13 @@ class VotingServer:
     def _set_items(self, db: sqlite3.Connection, set_id: int) -> list[dict]:
         return [
             {
-                "id":         row["id"],
-                "title":      row["title"],
-                "body":       row["body"],
-                "author":     row["author"],
-                "image_url":  f"images/{row['image_path']}" if row["image_path"] else None,
+                "id": row["id"],
+                "title": row["title"],
+                "body": row["body"],
+                "author": row["author"],
+                "image_url": (
+                    f"images/{row['image_path']}" if row["image_path"] else None
+                ),
                 "image_path": row["image_path"],
             }
             for row in db.execute(
@@ -955,15 +951,17 @@ class VotingServer:
         db = request["db"]
         sets = []
         for s in db.execute("SELECT * FROM candidate_sets ORDER BY name").fetchall():
-            sets.append({
-                "id":    s["id"],
-                "name":  s["name"],
-                "items": self._set_items(db, s["id"]),
-            })
+            sets.append(
+                {
+                    "id": s["id"],
+                    "name": s["name"],
+                    "items": self._set_items(db, s["id"]),
+                }
+            )
         return web.json_response(sets)
 
     async def _admin_create_set(self, request: web.Request) -> web.Response:
-        db   = request["db"]
+        db = request["db"]
         data = await request.json()
         name = (data.get("name") or "").strip()
         if not name:
@@ -972,28 +970,34 @@ class VotingServer:
             db.execute("INSERT INTO candidate_sets (name) VALUES (?)", (name,))
             db.commit()
         except Exception:
-            return web.json_response({"error": "A set with that name already exists"}, status=400)
-        row = db.execute("SELECT * FROM candidate_sets WHERE name = ?", (name,)).fetchone()
+            return web.json_response(
+                {"error": "A set with that name already exists"}, status=400
+            )
+        row = db.execute(
+            "SELECT * FROM candidate_sets WHERE name = ?", (name,)
+        ).fetchone()
         return web.json_response({"id": row["id"], "name": row["name"], "items": []})
 
     async def _admin_delete_set(self, request: web.Request) -> web.Response:
-        db     = request["db"]
+        db = request["db"]
         set_id = int(request.match_info["id"])
         db.execute("DELETE FROM candidate_sets WHERE id = ?", (set_id,))
         db.commit()
         return web.json_response({"ok": True})
 
     async def _admin_add_set_item(self, request: web.Request) -> web.Response:
-        db     = request["db"]
+        db = request["db"]
         set_id = int(request.match_info["id"])
-        if not db.execute("SELECT 1 FROM candidate_sets WHERE id = ?", (set_id,)).fetchone():
+        if not db.execute(
+            "SELECT 1 FROM candidate_sets WHERE id = ?", (set_id,)
+        ).fetchone():
             return web.json_response({"error": "Set not found"}, status=404)
-        data   = await request.json()
-        title  = (data.get("title") or "").strip()
+        data = await request.json()
+        title = (data.get("title") or "").strip()
         if not title:
             return web.json_response({"error": "Title required"}, status=400)
-        body       = (data.get("body")       or "").strip()
-        author     = (data.get("author")     or "").strip() or None
+        body = (data.get("body") or "").strip()
+        author = (data.get("author") or "").strip() or None
         image_path = (data.get("image_path") or "").strip() or None
         db.execute(
             "INSERT INTO candidate_set_items (set_id, title, body, author, image_path)"
@@ -1005,24 +1009,32 @@ class VotingServer:
             "SELECT * FROM candidate_set_items WHERE set_id = ? ORDER BY id DESC LIMIT 1",
             (set_id,),
         ).fetchone()
-        return web.json_response({
-            "id": row["id"], "title": row["title"], "body": row["body"],
-            "author": row["author"],
-            "image_url": f"images/{row['image_path']}" if row["image_path"] else None,
-            "image_path": row["image_path"],
-        })
+        return web.json_response(
+            {
+                "id": row["id"],
+                "title": row["title"],
+                "body": row["body"],
+                "author": row["author"],
+                "image_url": (
+                    f"images/{row['image_path']}" if row["image_path"] else None
+                ),
+                "image_path": row["image_path"],
+            }
+        )
 
     async def _admin_delete_set_item(self, request: web.Request) -> web.Response:
-        db      = request["db"]
+        db = request["db"]
         item_id = int(request.match_info["item_id"])
         db.execute("DELETE FROM candidate_set_items WHERE id = ?", (item_id,))
         db.commit()
         return web.json_response({"ok": True})
 
     async def _admin_save_current_to_set(self, request: web.Request) -> web.Response:
-        db     = request["db"]
+        db = request["db"]
         set_id = int(request.match_info["id"])
-        if not db.execute("SELECT 1 FROM candidate_sets WHERE id = ?", (set_id,)).fetchone():
+        if not db.execute(
+            "SELECT 1 FROM candidate_sets WHERE id = ?", (set_id,)
+        ).fetchone():
             return web.json_response({"error": "Set not found"}, status=404)
         db.execute("DELETE FROM candidate_set_items WHERE set_id = ?", (set_id,))
         for c in db.execute("SELECT * FROM candidates ORDER BY id").fetchall():
@@ -1032,18 +1044,28 @@ class VotingServer:
                 (set_id, c["title"], c["body"], c["author"], c["image_path"]),
             )
         db.commit()
-        return web.json_response({"ok": True, "count": db.execute(
-            "SELECT COUNT(*) FROM candidate_set_items WHERE set_id = ?", (set_id,)
-        ).fetchone()[0]})
+        return web.json_response(
+            {
+                "ok": True,
+                "count": db.execute(
+                    "SELECT COUNT(*) FROM candidate_set_items WHERE set_id = ?",
+                    (set_id,),
+                ).fetchone()[0],
+            }
+        )
 
     async def _admin_load_set(self, request: web.Request) -> web.Response:
-        db     = request["db"]
+        db = request["db"]
         set_id = int(request.match_info["id"])
-        if not db.execute("SELECT 1 FROM candidate_sets WHERE id = ?", (set_id,)).fetchone():
+        if not db.execute(
+            "SELECT 1 FROM candidate_sets WHERE id = ?", (set_id,)
+        ).fetchone():
             return web.json_response({"error": "Set not found"}, status=404)
         if db.execute("SELECT 1 FROM votes LIMIT 1").fetchone():
             return web.json_response(
-                {"error": "Reset the election first before loading a new candidate set"},
+                {
+                    "error": "Reset the election first before loading a new candidate set"
+                },
                 status=400,
             )
         db.execute("DELETE FROM candidates")
