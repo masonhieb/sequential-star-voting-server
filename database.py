@@ -21,8 +21,14 @@ def init_db(path: Path) -> None:
             """
             CREATE TABLE IF NOT EXISTS settings (
                 key   TEXT PRIMARY KEY,
-                value TEXT NOT NULL
+                value TEXT NOT NULL DEFAULT ''
             );
+
+            INSERT OR IGNORE INTO settings (key, value) VALUES
+                ('n_winners',       '1'),
+                ('voting_mode',     'star'),
+                ('election_title',  ''),
+                ('election_active', '1');
 
             CREATE TABLE IF NOT EXISTS candidates (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -115,9 +121,6 @@ def init_db(path: Path) -> None:
                 image_path TEXT
             );
 
-            INSERT OR IGNORE INTO settings VALUES ('n_winners', '1');
-            INSERT OR IGNORE INTO settings VALUES ('voting_mode', 'star');
-            INSERT OR IGNORE INTO settings VALUES ('election_title', '');
         """
         )
         if not db.execute("SELECT 1 FROM rounds").fetchone():

@@ -312,6 +312,14 @@ header {
   color: var(--muted);
   font-size: 1rem;
 }
+#voting-closed-notice {
+  display: none;
+  text-align: center;
+  padding: 2.5rem 1.5rem;
+  color: var(--muted);
+}
+#voting-closed-notice .closed-icon { font-size: 2.5rem; margin-bottom: .6rem; }
+#voting-closed-notice .closed-heading { font-size: 1.4rem; font-weight: 700; color: var(--text); margin-bottom: .4rem; }
 #election-complete-banner {
   display: none;
   background: #1a1040;
@@ -507,6 +515,11 @@ header {
       <h2 id="vote-heading">Cast Your Ballot</h2>
       <div id="candidates-list"></div>
       <div id="submit-section">
+        <div id="voting-closed-notice">
+          <div class="closed-icon">&#128274;</div>
+          <div class="closed-heading">Voting Not Open</div>
+          <div>The election is paused or it hasn't started yet.</div>
+        </div>
         <div id="submitted-notice">
           <div class="submitted-check">&#10003;</div>
           <div class="submitted-heading">Ballot Submitted</div>
@@ -749,7 +762,7 @@ function renderRoundBadge() {
 
 function renderCandidates() {
   const list = document.getElementById('candidates-list');
-  if (state.election_complete || hasSubmitted) {
+  if (state.election_complete || hasSubmitted || !state.election_active) {
     list.innerHTML = '';
     return;
   }
@@ -845,22 +858,32 @@ function renderSubmitSection() {
   const submitBtn = document.getElementById('submit-btn');
   const info     = document.getElementById('submit-info');
   const banner   = document.getElementById('election-complete-banner');
+  const closed   = document.getElementById('voting-closed-notice');
 
   if (state.election_complete) {
-    notice.style.display   = 'none';
+    closed.style.display    = 'none';
+    notice.style.display    = 'none';
     submitBtn.style.display = 'none';
-    info.style.display     = 'none';
-    banner.style.display   = '';
+    info.style.display      = 'none';
+    banner.style.display    = '';
+  } else if (!state.election_active) {
+    closed.style.display    = '';
+    notice.style.display    = 'none';
+    submitBtn.style.display = 'none';
+    info.style.display      = 'none';
+    banner.style.display    = 'none';
   } else if (hasSubmitted) {
-    notice.style.display   = 'flex';
+    closed.style.display    = 'none';
+    notice.style.display    = 'flex';
     submitBtn.style.display = 'none';
-    info.style.display     = 'none';
-    banner.style.display   = 'none';
+    info.style.display      = 'none';
+    banner.style.display    = 'none';
   } else {
-    notice.style.display   = 'none';
+    closed.style.display    = 'none';
+    notice.style.display    = 'none';
     submitBtn.style.display = '';
-    info.style.display     = '';
-    banner.style.display   = 'none';
+    info.style.display      = '';
+    banner.style.display    = 'none';
     updateSubmitBtn();
   }
 

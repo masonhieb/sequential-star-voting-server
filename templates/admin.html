@@ -262,9 +262,18 @@ input[type="file"]::file-selector-button {
         Multi-Winner Score <span style="color:var(--muted);font-size:.8rem">(single round, top-N by score)</span>
       </label>
     </div>
-    <div class="settings-row">
+    <div class="settings-row" style="margin-bottom:.9rem">
       <label for="n-winners-input">Number of Winners (N):</label>
       <input type="number" id="n-winners-input" min="1" value="1">
+    </div>
+    <div class="settings-row" style="margin-bottom:.9rem">
+      <label for="election-active-toggle" style="cursor:pointer">Election Active:</label>
+      <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;font-weight:400">
+        <input type="checkbox" id="election-active-toggle" checked style="width:1.1rem;height:1.1rem;cursor:pointer;accent-color:var(--success)">
+        <span id="election-active-label" style="font-size:.88rem;color:var(--muted)">Voting is open</span>
+      </label>
+    </div>
+    <div class="settings-row">
       <button class="btn" id="save-settings-btn">Save</button>
       <span class="msg" id="settings-msg"></span>
     </div>
@@ -415,12 +424,19 @@ async function loadSettings() {
     const mode = s.voting_mode || 'star';
     document.querySelector(`input[name="voting-mode"][value="${mode}"]`).checked = true;
     document.getElementById('election-title-input').value = s.election_title || '';
+    const active = s.election_active !== false;
+    document.getElementById('election-active-toggle').checked = active;
+    document.getElementById('election-active-label').textContent = active ? 'Voting is open' : 'Voting is closed';
     const isScore = mode === 'score';
     const label = isScore ? 'Multi-Winner Score Voting Admin' : 'STAR Voting Admin';
     document.getElementById('admin-page-title').textContent = `\u25C6 ${label}`;
     document.title = label;
   } catch(e) {}
 }
+
+document.getElementById('election-active-toggle').addEventListener('change', e => {
+  document.getElementById('election-active-label').textContent = e.target.checked ? 'Voting is open' : 'Voting is closed';
+});
 
 document.getElementById('save-settings-btn').addEventListener('click', async () => {
   const n     = parseInt(document.getElementById('n-winners-input').value);
@@ -432,7 +448,7 @@ document.getElementById('save-settings-btn').addEventListener('click', async () 
     const r = await fetch('/api/admin/settings', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({voter_name: 'Mason Hieb', n_winners: n, voting_mode: mode, election_title: title})
+      body: JSON.stringify({voter_name: 'Mason Hieb', n_winners: n, voting_mode: mode, election_title: title, election_active: document.getElementById('election-active-toggle').checked})
     });
     const d = await r.json();
     showMsg(msg, r.ok ? 'Saved!' : (d.error || 'Error'), r.ok);

@@ -186,7 +186,8 @@ class VotingServer:
     def _build_state(self, db: sqlite3.Connection) -> dict:
         n_winners = int(database.get_setting(db, "n_winners", "1"))
         voting_mode = database.get_setting(db, "voting_mode", "star")
-        election_title = database.get_setting(db, "election_title", "")
+        election_title  = database.get_setting(db, "election_title", "")
+        election_active = database.get_setting(db, "election_active", "1") == "1"
         round_row = database.current_round(db)
         if not round_row:
             return {}
@@ -260,6 +261,7 @@ class VotingServer:
             "election_complete": (
                 len(winners_data) >= n_winners or round_status == "complete"
             ),
+            "election_active": election_active,
         }
 
     # ── Voting algorithms ─────────────────────────────────────────────────────
@@ -560,6 +562,9 @@ class VotingServer:
         if not voter:
             return web.json_response({"error": "Voter not found"}, status=404)
 
+        if database.get_setting(db, "election_active", "1") != "1":
+            return web.json_response({"error": "Voting is not open yet"}, status=403)
+
         round_row = database.current_round(db)
         if not round_row or round_row["status"] != "voting":
             return web.json_response({"error": "No active voting round"}, status=400)
@@ -687,6 +692,11 @@ class VotingServer:
             db.execute(
                 "INSERT OR REPLACE INTO settings VALUES ('election_title', ?)",
                 (str(data["election_title"]).strip(),),
+            )
+        if "election_active" in data:
+            db.execute(
+                "INSERT OR REPLACE INTO settings VALUES ('election_active', ?)",
+                ("1" if data["election_active"] else "0",),
             )
         db.commit()
         await self._broadcast("state_update", self._build_state(db))
