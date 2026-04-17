@@ -1,10 +1,6 @@
 #!/usr/bin/env python3
 """
-N Sequential STAR Voting Server
-
-STAR voting (Score Then Automatic Runoff) with N sequential rounds.
-Each round elects one winner who is removed from the pool; winners are stored
-in a ranked hierarchy (1st, 2nd, … Nth place).
+Voting Tools Server
 """
 
 import argparse
