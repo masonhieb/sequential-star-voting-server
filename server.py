@@ -370,6 +370,7 @@ class VotingServer:
         r.add_post("/api/vote", self._vote)
         r.add_get("/api/admin/sets", self._admin_get_sets)
         r.add_post("/api/admin/sets", self._admin_create_set)
+        r.add_post("/api/admin/sets/import", self._admin_import_sets)
         r.add_delete("/api/admin/sets/{id}", self._admin_delete_set)
         r.add_post("/api/admin/sets/{id}/items", self._admin_add_set_item)
         r.add_delete(
@@ -377,6 +378,7 @@ class VotingServer:
         )
         r.add_post("/api/admin/sets/{id}/save-current", self._admin_save_current_to_set)
         r.add_post("/api/admin/sets/{id}/load", self._admin_load_set)
+        r.add_post("/api/admin/sets/{id}/reorder", self._admin_reorder_set)
         r.add_post("/api/admin/login", self._admin_login)
         r.add_post("/api/admin/candidates", self._admin_add_candidate)
         r.add_delete("/api/admin/candidates/{id}", self._admin_delete_candidate)
@@ -948,7 +950,7 @@ class VotingServer:
                 "image_path": row["image_path"],
             }
             for row in db.execute(
-                "SELECT * FROM candidate_set_items WHERE set_id = ? ORDER BY id",
+                "SELECT * FROM candidate_set_items WHERE set_id = ? ORDER BY sort_order, id",
                 (set_id,),
             ).fetchall()
         ]
@@ -1005,10 +1007,14 @@ class VotingServer:
         body = (data.get("body") or "").strip()
         author = (data.get("author") or "").strip() or None
         image_path = (data.get("image_path") or "").strip() or None
+        next_order = db.execute(
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM candidate_set_items WHERE set_id = ?",
+            (set_id,),
+        ).fetchone()[0]
         db.execute(
-            "INSERT INTO candidate_set_items (set_id, title, body, author, image_path)"
-            " VALUES (?,?,?,?,?)",
-            (set_id, title, body, author, image_path),
+            "INSERT INTO candidate_set_items (set_id, title, body, author, image_path, sort_order)"
+            " VALUES (?,?,?,?,?,?)",
+            (set_id, title, body, author, image_path, next_order),
         )
         db.commit()
         row = db.execute(
@@ -1043,11 +1049,11 @@ class VotingServer:
         ).fetchone():
             return web.json_response({"error": "Set not found"}, status=404)
         db.execute("DELETE FROM candidate_set_items WHERE set_id = ?", (set_id,))
-        for c in db.execute("SELECT * FROM candidates ORDER BY id").fetchall():
+        for i, c in enumerate(db.execute("SELECT * FROM candidates ORDER BY id").fetchall()):
             db.execute(
-                "INSERT INTO candidate_set_items (set_id, title, body, author, image_path)"
-                " VALUES (?,?,?,?,?)",
-                (set_id, c["title"], c["body"], c["author"], c["image_path"]),
+                "INSERT INTO candidate_set_items (set_id, title, body, author, image_path, sort_order)"
+                " VALUES (?,?,?,?,?,?)",
+                (set_id, c["title"], c["body"], c["author"], c["image_path"], i),
             )
         db.commit()
         return web.json_response(
@@ -1076,7 +1082,8 @@ class VotingServer:
             )
         db.execute("DELETE FROM candidates")
         for item in db.execute(
-            "SELECT * FROM candidate_set_items WHERE set_id = ? ORDER BY id", (set_id,)
+            "SELECT * FROM candidate_set_items WHERE set_id = ? ORDER BY sort_order, id",
+            (set_id,),
         ).fetchall():
             db.execute(
                 "INSERT INTO candidates (title, body, author, image_path) VALUES (?,?,?,?)",
@@ -1084,6 +1091,66 @@ class VotingServer:
             )
         db.commit()
         await self._broadcast("state_update", self._build_state(db))
+        return web.json_response({"ok": True})
+
+    async def _admin_import_sets(self, request: web.Request) -> web.Response:
+        db = request["db"]
+        data = await request.json()
+        sets = data.get("sets", [])
+        overwrite = bool(data.get("overwrite", False))
+        imported = skipped = replaced = 0
+        for s in sets:
+            name = (s.get("name") or "").strip()
+            items = s.get("items") or []
+            if not name:
+                skipped += 1
+                continue
+            existing = db.execute(
+                "SELECT id FROM candidate_sets WHERE name = ?", (name,)
+            ).fetchone()
+            if existing and not overwrite:
+                skipped += 1
+                continue
+            if existing:
+                db.execute(
+                    "DELETE FROM candidate_set_items WHERE set_id = ?", (existing["id"],)
+                )
+                set_id = existing["id"]
+                replaced += 1
+            else:
+                db.execute("INSERT INTO candidate_sets (name) VALUES (?)", (name,))
+                set_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
+                imported += 1
+            for i, item in enumerate(items):
+                db.execute(
+                    "INSERT INTO candidate_set_items"
+                    " (set_id, title, body, author, image_path, sort_order)"
+                    " VALUES (?,?,?,?,?,?)",
+                    (
+                        set_id,
+                        (item.get("title") or "").strip(),
+                        (item.get("body") or "").strip(),
+                        item.get("author") or None,
+                        item.get("image_path") or None,
+                        i,
+                    ),
+                )
+        db.commit()
+        return web.json_response(
+            {"ok": True, "imported": imported, "replaced": replaced, "skipped": skipped}
+        )
+
+    async def _admin_reorder_set(self, request: web.Request) -> web.Response:
+        db = request["db"]
+        set_id = int(request.match_info["id"])
+        data = await request.json()
+        item_ids = data.get("item_ids", [])
+        for sort_order, item_id in enumerate(item_ids):
+            db.execute(
+                "UPDATE candidate_set_items SET sort_order = ? WHERE id = ? AND set_id = ?",
+                (sort_order, item_id, set_id),
+            )
+        db.commit()
         return web.json_response({"ok": True})
 
     async def _admin_login(self, request: web.Request) -> web.Response:

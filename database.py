@@ -118,7 +118,8 @@ def init_db(path: Path) -> None:
                 title      TEXT NOT NULL,
                 body       TEXT NOT NULL DEFAULT '',
                 author     TEXT,
-                image_path TEXT
+                image_path TEXT,
+                sort_order INTEGER NOT NULL DEFAULT 0
             );
 
         """

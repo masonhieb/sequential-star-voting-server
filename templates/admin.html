@@ -340,6 +340,15 @@ input[type="file"]::file-selector-button {
       <button class="btn" id="create-set-btn">Create Set</button>
       <span class="msg" id="create-set-msg"></span>
     </div>
+    <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:1rem;padding-bottom:1rem;border-bottom:1px solid var(--border)">
+      <button class="btn btn-ghost btn-sm" onclick="exportAllSets()" title="Download all sets as JSON">&#8659; Export All</button>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('import-file').click()" title="Import sets from a JSON file">&#8657; Import JSON</button>
+      <label style="display:flex;align-items:center;gap:.35rem;font-size:.82rem;color:var(--muted);cursor:pointer">
+        <input type="checkbox" id="import-overwrite-cb" style="cursor:pointer;accent-color:var(--primary)"> Overwrite existing
+      </label>
+      <input type="file" id="import-file" accept=".json" style="display:none">
+      <span class="msg" id="import-msg"></span>
+    </div>
     <div id="sets-list"><span style="color:var(--muted);font-size:.9rem">Loading…</span></div>
   </div>
 
@@ -686,11 +695,14 @@ async function loadHistory() {
 }
 
 // ── Candidate sets ──────────────────────────────────────────────────────────
+let setsData = [];
+
 async function loadSets() {
   const el = document.getElementById('sets-list');
   try {
     const r = await fetch('/api/admin/sets');
     const sets = await r.json();
+    setsData = sets;
     if (!sets.length) {
       el.innerHTML = '<span style="color:var(--muted);font-size:.9rem">No sets yet.</span>';
       return;
@@ -714,15 +726,25 @@ async function loadSets() {
         <div style="display:flex;align-items:center;gap:.6rem;padding:.65rem .85rem;background:var(--surface2)">
           <span style="flex:1;font-weight:600">${esc(s.name)}</span>
           <span style="font-size:.78rem;color:var(--muted)">${s.items.length} candidate${s.items.length !== 1 ? 's' : ''}</span>
+          <button class="btn btn-ghost btn-sm" onclick="exportSet(${s.id})" title="Download this set as JSON">&#8659;</button>
+          <button class="btn btn-ghost btn-sm" onclick="shuffleSet(${s.id})" title="Shuffle candidate order">&#8652; Shuffle</button>
+          <button class="btn btn-ghost btn-sm" onclick="sortSet(${s.id},'asc')" title="Sort A&#8594;Z">A&#8594;Z</button>
+          <button class="btn btn-ghost btn-sm" onclick="sortSet(${s.id},'desc')" title="Sort Z&#8594;A">Z&#8594;A</button>
           <button class="btn btn-sm" onclick="saveCurrentToSet(${s.id},'${esc(s.name).replace(/'/g,"\\'")}',this)" title="Overwrite this set with the current active candidates">Save Current Here</button>
           <button class="btn btn-sm" onclick="loadSet(${s.id},'${esc(s.name).replace(/'/g,"\\'")}',this)" title="Load this set as the active candidates (requires no active votes)">Load into Election</button>
           <button class="btn btn-danger btn-sm" onclick="deleteSet(${s.id},this)">Delete</button>
         </div>
         <div style="padding:.6rem .85rem">
           ${itemsHtml}
-          <div style="margin-top:.6rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
-            <input type="text" placeholder="Add candidate title…" id="set-add-title-${s.id}" style="flex:1;min-width:140px;font-size:.85rem;padding:.4rem .65rem">
-            <button class="btn btn-sm" onclick="addSetItem(${s.id})">Add</button>
+          <div style="margin-top:.75rem;border-top:1px solid var(--border);padding-top:.65rem;display:flex;flex-direction:column;gap:.4rem">
+            <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+              <input type="text" placeholder="Title *" id="set-add-title-${s.id}" style="flex:2;min-width:140px;font-size:.85rem;padding:.4rem .65rem">
+              <input type="text" placeholder="Author (optional)" id="set-add-author-${s.id}" style="flex:1;min-width:120px;font-size:.85rem;padding:.4rem .65rem">
+            </div>
+            <div style="display:flex;gap:.5rem;align-items:flex-end">
+              <textarea placeholder="Body / description (Markdown, optional)" id="set-add-body-${s.id}" rows="2" style="flex:1;font-size:.85rem;padding:.4rem .65rem;min-height:58px;resize:vertical"></textarea>
+              <button class="btn btn-sm" onclick="addSetItem(${s.id})" style="align-self:flex-end">Add</button>
+            </div>
           </div>
         </div>
       </div>`;
@@ -754,6 +776,84 @@ document.getElementById('new-set-name').addEventListener('keydown', e => {
   if (e.key === 'Enter') document.getElementById('create-set-btn').click();
 });
 
+function downloadJson(data, filename) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement('a'), {href: url, download: filename});
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function setToExportShape(s) {
+  return {
+    name: s.name,
+    items: s.items.map(i => ({title: i.title, body: i.body || '', author: i.author || null, image_path: i.image_path || null}))
+  };
+}
+
+function exportAllSets() {
+  if (!setsData.length) return;
+  downloadJson(setsData.map(setToExportShape), 'candidate-sets.json');
+}
+
+function exportSet(id) {
+  const set = setsData.find(s => s.id === id);
+  if (!set) return;
+  const slug = set.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  downloadJson([setToExportShape(set)], `${slug}.json`);
+}
+
+document.getElementById('import-file').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  const msg = document.getElementById('import-msg');
+  let data;
+  try { data = JSON.parse(await file.text()); } catch { showMsg(msg, 'Invalid JSON', false); return; }
+  if (!Array.isArray(data)) { showMsg(msg, 'JSON must be an array of sets', false); return; }
+  const overwrite = document.getElementById('import-overwrite-cb').checked;
+  try {
+    const r = await fetch('/api/admin/sets/import', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({sets: data, overwrite})
+    });
+    const d = await r.json();
+    if (!r.ok) { showMsg(msg, d.error || 'Error', false); return; }
+    showMsg(msg, `Imported ${d.imported}, replaced ${d.replaced}, skipped ${d.skipped}`, true);
+    loadSets();
+  } catch { showMsg(msg, 'Network error', false); }
+});
+
+async function reorderSet(id, itemIds) {
+  const r = await fetch(`/api/admin/sets/${id}/reorder`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({item_ids: itemIds})
+  });
+  if (r.ok) loadSets();
+}
+
+async function shuffleSet(id) {
+  const set = setsData.find(s => s.id === id);
+  if (!set || set.items.length < 2) return;
+  const ids = set.items.map(i => i.id);
+  for (let i = ids.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+  }
+  await reorderSet(id, ids);
+}
+
+async function sortSet(id, dir) {
+  const set = setsData.find(s => s.id === id);
+  if (!set || !set.items.length) return;
+  const items = [...set.items].sort((a, b) =>
+    dir === 'asc' ? a.title.localeCompare(b.title) : b.title.localeCompare(a.title)
+  );
+  await reorderSet(id, items.map(i => i.id));
+}
+
 async function deleteSet(id, btn) {
   if (!confirm('Delete this set? This cannot be undone.')) return;
   btn.disabled = true;
@@ -764,17 +864,25 @@ async function deleteSet(id, btn) {
 }
 
 async function addSetItem(setId) {
-  const input = document.getElementById(`set-add-title-${setId}`);
-  const title = input.value.trim();
-  if (!title) return;
+  const titleEl  = document.getElementById(`set-add-title-${setId}`);
+  const authorEl = document.getElementById(`set-add-author-${setId}`);
+  const bodyEl   = document.getElementById(`set-add-body-${setId}`);
+  const title = titleEl.value.trim();
+  if (!title) { titleEl.focus(); return; }
   try {
     const r = await fetch(`/api/admin/sets/${setId}/items`, {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({title})
+      body: JSON.stringify({
+        title,
+        author: authorEl.value.trim() || null,
+        body:   bodyEl.value.trim()   || ''
+      })
     });
     if (!r.ok) { alert((await r.json()).error || 'Error'); return; }
-    input.value = '';
+    titleEl.value = '';
+    authorEl.value = '';
+    bodyEl.value = '';
     loadSets();
   } catch(e) { alert('Network error'); }
 }
