@@ -28,7 +28,8 @@ def init_db(path: Path) -> None:
                 ('n_winners',       '1'),
                 ('voting_mode',     'star'),
                 ('election_title',  ''),
-                ('election_active', '1');
+                ('election_active', '1'),
+                ('show_author',     '1');
 
             CREATE TABLE IF NOT EXISTS candidates (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,

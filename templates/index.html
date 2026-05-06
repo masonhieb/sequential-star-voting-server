@@ -139,18 +139,6 @@ header {
   white-space: nowrap;
 }
 
-/* ── Mason controls bar ──────────────────────────────────────── */
-#mason-bar {
-  display: none;
-  background: #1a1040;
-  border-bottom: 1px solid #3730a3;
-  padding: .75rem 1.5rem;
-  gap: .75rem;
-  flex-wrap: wrap;
-  align-items: center;
-}
-#mason-bar.visible { display: flex; }
-#mason-bar span { color: #a5b4fc; font-size: .85rem; font-weight: 600; flex: 1; }
 
 /* ── Main layout ─────────────────────────────────────────────── */
 #content {
@@ -219,6 +207,11 @@ header {
 }
 .candidate-body p { margin-bottom: .4rem; }
 .candidate-body p:last-child { margin-bottom: 0; }
+.candidate-body ul,
+.candidate-body ol { padding-left: 1.4em; margin-bottom: .4rem; }
+.candidate-body li { margin-bottom: .15rem; }
+.candidate-body li > ul,
+.candidate-body li > ol { margin-bottom: 0; }
 .candidate-body a { color: var(--primary-h); }
 .candidate-body code {
   background: var(--surface2);
@@ -502,12 +495,7 @@ header {
     <button id="logout-btn" class="btn btn-outline btn-sm">Switch User</button>
   </header>
 
-  <!-- Mason controls bar -->
-  <div id="mason-bar">
-    <span>&#9670; Mason Controls</span>
-    <button class="btn btn-sm" id="reveal-btn">Reveal Winner</button>
-    <button class="btn btn-sm btn-danger" id="reset-btn">Reset Election</button>
-  </div>
+
 
   <div id="content">
     <!-- Voting area -->
@@ -569,7 +557,6 @@ let voterFirstName = localStorage.getItem('voter_first_name') || null;
 let voterLastName  = localStorage.getItem('voter_last_name')  || null;
 let voterName      = (voterFirstName && voterLastName) ? `${voterFirstName} ${voterLastName}` : null;
 let voterId        = localStorage.getItem('voter_id')   || null;
-let isMason        = localStorage.getItem('is_mason') === 'true';
 let scores       = {};          // { candidateId(int): score(int) }
 let state        = null;
 let prevWinCount = 0;
@@ -616,12 +603,10 @@ async function submitName(first, last) {
     localStorage.setItem('voter_first_name', data.first_name);
     localStorage.setItem('voter_last_name',  data.last_name);
     localStorage.setItem('voter_id',         data.id);
-    localStorage.setItem('is_mason',         data.is_mason ? 'true' : 'false');
     voterFirstName = data.first_name;
     voterLastName  = data.last_name;
     voterName      = data.name;
     voterId        = data.id;
-    isMason        = data.is_mason;
     enterApp();
   } catch(e) { showErr('Network error.'); }
 }
@@ -657,7 +642,6 @@ async function enterApp() {
   document.getElementById('name-overlay').style.display = 'none';
   document.getElementById('app').classList.add('visible');
   document.getElementById('greeting-name').textContent = voterName.toUpperCase();
-  if (isMason) document.getElementById('mason-bar').classList.add('visible');
   // Pre-load any existing scores (restores ballot after admin unsubmit + page refresh)
   try {
     const r = await fetch('/api/my-scores?voter_name=' + encodeURIComponent(voterName));
@@ -783,7 +767,7 @@ function buildCandidateCard(c) {
     ? `<img class="candidate-img" src="${esc(c.image_url)}" alt="${esc(c.title)}">`
     : '';
   const author = c.author
-    ? `<div class="candidate-author">by ${esc(c.author)}</div>`
+    ? (state.show_author ? `<div class="candidate-author">${esc(c.author)}</div>` : '')
     : '';
 
   div.innerHTML = `
@@ -887,10 +871,7 @@ function renderSubmitSection() {
     updateSubmitBtn();
   }
 
-  // Mason reveal button state
-  if (isMason) {
-    document.getElementById('reveal-btn').disabled = state.election_complete;
-  }
+
 }
 
 function renderVoters() {
@@ -963,34 +944,6 @@ document.getElementById('submit-btn').addEventListener('click', async () => {
   document.getElementById('submit-btn').disabled = false;
 });
 
-// ── Mason controls ─────────────────────────────────────────────────────────
-document.getElementById('reveal-btn').addEventListener('click', async () => {
-  document.getElementById('reveal-btn').disabled = true;
-  try {
-    const r = await fetch('/api/admin/reveal', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({voter_name: voterName})
-    });
-    const data = await r.json();
-    if (!r.ok) { alert(data.error || 'Failed to reveal winner.'); }
-  } catch(e) { alert('Network error.'); }
-  document.getElementById('reveal-btn').disabled = false;
-});
-
-document.getElementById('reset-btn').addEventListener('click', async () => {
-  if (!confirm('Reset the election? This will clear all votes and restart from Round 1. Candidates and voter names are kept.')) return;
-  try {
-    const r = await fetch('/api/admin/reset', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({voter_name: voterName})
-    });
-    const data = await r.json();
-    if (!r.ok) { alert(data.error || 'Failed to reset.'); }
-    else { scores = {}; hasSubmitted = false; }
-  } catch(e) { alert('Network error.'); }
-});
 
 // ── Winner overlay ─────────────────────────────────────────────────────────
 function showWinnerOverlay(winner) {
@@ -1053,7 +1006,6 @@ document.getElementById('logout-btn').addEventListener('click', () => {
   localStorage.removeItem('voter_first_name');
   localStorage.removeItem('voter_last_name');
   localStorage.removeItem('voter_id');
-  localStorage.removeItem('is_mason');
   if (eventSource) eventSource.close();
   location.reload();
 });

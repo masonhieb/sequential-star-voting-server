@@ -227,6 +227,30 @@ input[type="file"]::file-selector-button {
 </style>
 </head>
 <body>
+<!-- Edit set item modal -->
+<div id="edit-item-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:300;align-items:center;justify-content:center">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:1.75rem;width:min(480px,94vw);display:flex;flex-direction:column;gap:.85rem">
+    <h3 style="font-size:1rem;font-weight:700;margin:0">Edit Candidate</h3>
+    <div class="form-group">
+      <label>Title *</label>
+      <input type="text" id="edit-item-title">
+    </div>
+    <div class="form-group">
+      <label>Author (optional)</label>
+      <input type="text" id="edit-item-author">
+    </div>
+    <div class="form-group">
+      <label>Body (Markdown, optional)</label>
+      <textarea id="edit-item-body" rows="5"></textarea>
+    </div>
+    <div style="display:flex;gap:.6rem;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="closeEditItemModal()">Cancel</button>
+      <button class="btn" id="edit-item-save-btn">Save</button>
+    </div>
+    <span class="msg" id="edit-item-msg" style="text-align:right"></span>
+  </div>
+</div>
+
 <div id="pw-overlay">
   <div id="pw-card">
     <h2>&#9670; Admin Access</h2>
@@ -243,6 +267,16 @@ input[type="file"]::file-selector-button {
 </header>
 
 <main>
+
+  <!-- Election controls -->
+  <div class="card">
+    <h2>Election Controls</h2>
+    <div style="display:flex;gap:.75rem;align-items:center;flex-wrap:wrap">
+      <button class="btn" id="reveal-btn">Reveal Winner</button>
+      <button class="btn btn-danger" id="reset-btn">Reset Election</button>
+      <span class="msg" id="controls-msg"></span>
+    </div>
+  </div>
 
   <!-- Settings -->
   <div class="card">
@@ -271,6 +305,13 @@ input[type="file"]::file-selector-button {
       <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;font-weight:400">
         <input type="checkbox" id="election-active-toggle" checked style="width:1.1rem;height:1.1rem;cursor:pointer;accent-color:var(--success)">
         <span id="election-active-label" style="font-size:.88rem;color:var(--muted)">Voting is open</span>
+      </label>
+    </div>
+    <div class="settings-row" style="margin-bottom:.9rem">
+      <label for="show-author-toggle" style="cursor:pointer">Show Author:</label>
+      <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;font-weight:400">
+        <input type="checkbox" id="show-author-toggle" checked style="width:1.1rem;height:1.1rem;cursor:pointer;accent-color:var(--success)">
+        <span id="show-author-label" style="font-size:.88rem;color:var(--muted)">Author shown on ballot</span>
       </label>
     </div>
     <div class="settings-row">
@@ -422,6 +463,42 @@ function initAdmin() {
   loadSets();
   loadHistory();
   loadVotersForUnsubmit();
+  initControls();
+}
+
+// ── Election controls ──────────────────────────────────────────────────────
+function initControls() {
+  document.getElementById('reveal-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('reveal-btn');
+    const msg = document.getElementById('controls-msg');
+    btn.disabled = true;
+    try {
+      const r = await fetch('/api/admin/reveal', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({voter_name: 'Mason Hieb'})
+      });
+      const d = await r.json();
+      if (!r.ok) { showMsg(msg, d.error || 'Error', false); }
+      else { showMsg(msg, 'Winner revealed!', true); loadHistory(); }
+    } catch(e) { showMsg(msg, 'Network error', false); }
+    btn.disabled = false;
+  });
+
+  document.getElementById('reset-btn').addEventListener('click', async () => {
+    if (!confirm('Reset the election? This clears all votes and restarts from Round 1. Candidates and voter names are kept.')) return;
+    const msg = document.getElementById('controls-msg');
+    try {
+      const r = await fetch('/api/admin/reset', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({voter_name: 'Mason Hieb'})
+      });
+      const d = await r.json();
+      if (!r.ok) { showMsg(msg, d.error || 'Error', false); }
+      else { showMsg(msg, 'Election reset.', true); loadHistory(); loadVotersForUnsubmit(); }
+    } catch(e) { showMsg(msg, 'Network error', false); }
+  });
 }
 
 // ── Settings ───────────────────────────────────────────────────────────────
@@ -436,6 +513,9 @@ async function loadSettings() {
     const active = s.election_active !== false;
     document.getElementById('election-active-toggle').checked = active;
     document.getElementById('election-active-label').textContent = active ? 'Voting is open' : 'Voting is closed';
+    const showAuthor = s.show_author !== false;
+    document.getElementById('show-author-toggle').checked = showAuthor;
+    document.getElementById('show-author-label').textContent = showAuthor ? 'Author shown on ballot' : 'Author hidden on ballot';
     const isScore = mode === 'score';
     const label = isScore ? 'Multi-Winner Score Voting Admin' : 'STAR Voting Admin';
     document.getElementById('admin-page-title').textContent = `\u25C6 ${label}`;
@@ -445,6 +525,9 @@ async function loadSettings() {
 
 document.getElementById('election-active-toggle').addEventListener('change', e => {
   document.getElementById('election-active-label').textContent = e.target.checked ? 'Voting is open' : 'Voting is closed';
+});
+document.getElementById('show-author-toggle').addEventListener('change', e => {
+  document.getElementById('show-author-label').textContent = e.target.checked ? 'Author shown on ballot' : 'Author hidden on ballot';
 });
 
 document.getElementById('save-settings-btn').addEventListener('click', async () => {
@@ -457,7 +540,7 @@ document.getElementById('save-settings-btn').addEventListener('click', async () 
     const r = await fetch('/api/admin/settings', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({voter_name: 'Mason Hieb', n_winners: n, voting_mode: mode, election_title: title, election_active: document.getElementById('election-active-toggle').checked})
+      body: JSON.stringify({voter_name: 'Mason Hieb', n_winners: n, voting_mode: mode, election_title: title, election_active: document.getElementById('election-active-toggle').checked, show_author: document.getElementById('show-author-toggle').checked})
     });
     const d = await r.json();
     showMsg(msg, r.ok ? 'Saved!' : (d.error || 'Error'), r.ok);
@@ -666,9 +749,10 @@ async function loadHistory() {
       }
 
       return `<div style="margin-bottom:1.6rem;padding-bottom:1.6rem;border-bottom:1px solid var(--border)">
-        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:.4rem">
-          <span style="font-weight:600;font-size:1.05rem">${esc(e.title)}</span>
-          <span style="color:var(--muted);font-size:.8rem">${fmtDate(e.completed_at)}</span>
+        <div style="display:flex;align-items:baseline;gap:.75rem;margin-bottom:.4rem">
+          <span style="font-weight:600;font-size:1.05rem;flex:1">${esc(e.title)}</span>
+          <span style="color:var(--muted);font-size:.8rem;white-space:nowrap">${fmtDate(e.completed_at)}</span>
+          <button class="btn btn-danger btn-sm" onclick="deleteElection(${e.id},this)">Delete</button>
         </div>
         <div style="color:var(--muted);font-size:.8rem;margin-bottom:.6rem">${esc(modeLabel)} · ${e.n_winners} winner${e.n_winners !== 1 ? 's' : ''}</div>
         <div>${resultsHtml}</div>
@@ -694,6 +778,16 @@ async function loadHistory() {
   }
 }
 
+async function deleteElection(id, btn) {
+  if (!confirm('Delete this election from history? This cannot be undone.')) return;
+  btn.disabled = true;
+  try {
+    const r = await fetch(`/api/admin/elections/${id}`, {method: 'DELETE'});
+    if (!r.ok) { btn.disabled = false; alert((await r.json()).error || 'Error'); return; }
+    loadHistory();
+  } catch(e) { btn.disabled = false; alert('Network error'); }
+}
+
 // ── Candidate sets ──────────────────────────────────────────────────────────
 let setsData = [];
 
@@ -709,30 +803,38 @@ async function loadSets() {
     }
     el.innerHTML = sets.map(s => {
       const itemsHtml = s.items.length
-        ? s.items.map(item => {
+        ? s.items.map((item, idx) => {
             const img = item.image_url
               ? `<img src="${esc(item.image_url)}" style="width:40px;height:30px;object-fit:cover;border-radius:4px;border:1px solid var(--border);flex-shrink:0">`
               : '';
             const author = item.author ? `<span style="font-size:.75rem;color:var(--muted)"> — ${esc(item.author)}</span>` : '';
+            const isFirst = idx === 0, isLast = idx === s.items.length - 1;
             return `<div style="display:flex;align-items:center;gap:.6rem;padding:.3rem 0;border-bottom:1px solid var(--border)">
               ${img}
               <span style="flex:1;font-size:.88rem">${esc(item.title)}${author}</span>
+              <button class="btn btn-ghost btn-sm" onclick="moveSetItemUp(${s.id},${item.id})" ${isFirst ? 'disabled' : ''} title="Move up" style="padding:.3rem .5rem">&#8593;</button>
+              <button class="btn btn-ghost btn-sm" onclick="moveSetItemDown(${s.id},${item.id})" ${isLast ? 'disabled' : ''} title="Move down" style="padding:.3rem .5rem">&#8595;</button>
+              <button class="btn btn-ghost btn-sm" onclick="openEditItemModal(${s.id},${item.id})">Edit</button>
               <button class="btn btn-danger btn-sm" onclick="deleteSetItem(${s.id},${item.id},this)">✕</button>
             </div>`;
           }).join('')
         : '<span style="color:var(--muted);font-size:.82rem">No candidates in this set.</span>';
 
       return `<div style="border:1px solid var(--border);border-radius:8px;margin-bottom:.75rem;overflow:hidden">
-        <div style="display:flex;align-items:center;gap:.6rem;padding:.65rem .85rem;background:var(--surface2)">
-          <span style="flex:1;font-weight:600">${esc(s.name)}</span>
-          <span style="font-size:.78rem;color:var(--muted)">${s.items.length} candidate${s.items.length !== 1 ? 's' : ''}</span>
-          <button class="btn btn-ghost btn-sm" onclick="exportSet(${s.id})" title="Download this set as JSON">&#8659;</button>
-          <button class="btn btn-ghost btn-sm" onclick="shuffleSet(${s.id})" title="Shuffle candidate order">&#8652; Shuffle</button>
-          <button class="btn btn-ghost btn-sm" onclick="sortSet(${s.id},'asc')" title="Sort A&#8594;Z">A&#8594;Z</button>
-          <button class="btn btn-ghost btn-sm" onclick="sortSet(${s.id},'desc')" title="Sort Z&#8594;A">Z&#8594;A</button>
-          <button class="btn btn-sm" onclick="saveCurrentToSet(${s.id},'${esc(s.name).replace(/'/g,"\\'")}',this)" title="Overwrite this set with the current active candidates">Save Current Here</button>
-          <button class="btn btn-sm" onclick="loadSet(${s.id},'${esc(s.name).replace(/'/g,"\\'")}',this)" title="Load this set as the active candidates (requires no active votes)">Load into Election</button>
-          <button class="btn btn-danger btn-sm" onclick="deleteSet(${s.id},this)">Delete</button>
+        <div style="background:var(--surface2);padding:.65rem .85rem">
+          <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.4rem">
+            <span style="flex:1;font-weight:600">${esc(s.name)}</span>
+            <span style="font-size:.78rem;color:var(--muted);white-space:nowrap">${s.items.length} candidate${s.items.length !== 1 ? 's' : ''}</span>
+          </div>
+          <div style="display:flex;gap:.4rem;flex-wrap:wrap;align-items:center">
+            <button class="btn btn-ghost btn-sm" onclick="exportSet(${s.id})" title="Download this set as JSON">&#8659; Export</button>
+            <button class="btn btn-ghost btn-sm" onclick="shuffleSet(${s.id})" title="Shuffle candidate order">&#8652; Shuffle</button>
+            <button class="btn btn-ghost btn-sm" onclick="sortSet(${s.id},'asc')" title="Sort A&#8594;Z">A&#8594;Z</button>
+            <button class="btn btn-ghost btn-sm" onclick="sortSet(${s.id},'desc')" title="Sort Z&#8594;A">Z&#8594;A</button>
+            <button class="btn btn-sm" onclick="saveCurrentToSet(${s.id},'${esc(s.name).replace(/'/g,"\\'")}',this)" title="Overwrite this set with the current active candidates">Save Current Here</button>
+            <button class="btn btn-sm" onclick="loadSet(${s.id},'${esc(s.name).replace(/'/g,"\\'")}',this)" title="Load this set as the active candidates (requires no active votes)">Load into Election</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteSet(${s.id},this)">Delete Set</button>
+          </div>
         </div>
         <div style="padding:.6rem .85rem">
           ${itemsHtml}
@@ -834,6 +936,26 @@ async function reorderSet(id, itemIds) {
   if (r.ok) loadSets();
 }
 
+async function moveSetItemUp(setId, itemId) {
+  const set = setsData.find(s => s.id === setId);
+  if (!set) return;
+  const idx = set.items.findIndex(i => i.id === itemId);
+  if (idx <= 0) return;
+  const ids = set.items.map(i => i.id);
+  [ids[idx - 1], ids[idx]] = [ids[idx], ids[idx - 1]];
+  await reorderSet(setId, ids);
+}
+
+async function moveSetItemDown(setId, itemId) {
+  const set = setsData.find(s => s.id === setId);
+  if (!set) return;
+  const idx = set.items.findIndex(i => i.id === itemId);
+  if (idx < 0 || idx >= set.items.length - 1) return;
+  const ids = set.items.map(i => i.id);
+  [ids[idx], ids[idx + 1]] = [ids[idx + 1], ids[idx]];
+  await reorderSet(setId, ids);
+}
+
 async function shuffleSet(id) {
   const set = setsData.find(s => s.id === id);
   if (!set || set.items.length < 2) return;
@@ -920,6 +1042,56 @@ async function loadSet(id, name, btn) {
     loadCandidates();
   } catch(e) { btn.disabled = false; alert('Network error'); }
 }
+
+// ── Edit set item modal ─────────────────────────────────────────────────────
+let _editItemSetId = null, _editItemId = null;
+
+function openEditItemModal(setId, itemId) {
+  const set  = setsData.find(s => s.id === setId);
+  const item = set && set.items.find(i => i.id === itemId);
+  if (!item) return;
+  _editItemSetId = setId;
+  _editItemId    = itemId;
+  document.getElementById('edit-item-title').value  = item.title  || '';
+  document.getElementById('edit-item-author').value = item.author || '';
+  document.getElementById('edit-item-body').value   = item.body   || '';
+  document.getElementById('edit-item-msg').textContent = '';
+  const modal = document.getElementById('edit-item-modal');
+  modal.style.display = 'flex';
+  document.getElementById('edit-item-title').focus();
+}
+
+function closeEditItemModal() {
+  document.getElementById('edit-item-modal').style.display = 'none';
+  _editItemSetId = _editItemId = null;
+}
+
+document.getElementById('edit-item-modal').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeEditItemModal();
+});
+
+document.getElementById('edit-item-save-btn').addEventListener('click', async () => {
+  if (!_editItemSetId || !_editItemId) return;
+  const title  = document.getElementById('edit-item-title').value.trim();
+  const author = document.getElementById('edit-item-author').value.trim();
+  const body   = document.getElementById('edit-item-body').value.trim();
+  const msg    = document.getElementById('edit-item-msg');
+  if (!title) { showMsg(msg, 'Title is required', false); return; }
+  const btn = document.getElementById('edit-item-save-btn');
+  btn.disabled = true;
+  try {
+    const r = await fetch(`/api/admin/sets/${_editItemSetId}/items/${_editItemId}`, {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({title, author: author || null, body})
+    });
+    const d = await r.json();
+    btn.disabled = false;
+    if (!r.ok) { showMsg(msg, d.error || 'Error', false); return; }
+    closeEditItemModal();
+    loadSets();
+  } catch(e) { btn.disabled = false; showMsg(msg, 'Network error', false); }
+});
 
 // ── Unsubmit ballot ─────────────────────────────────────────────────────────
 async function loadVotersForUnsubmit() {

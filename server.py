@@ -33,7 +33,7 @@ ALLOWED_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
 
 
 def render_markdown(text: str) -> str:
-    return md_lib.markdown(text or "", extensions=["extra", "nl2br"])
+    return md_lib.markdown(text or "", extensions=["extra", "nl2br"], tab_length=2)
 
 
 class VotingServer:
@@ -188,6 +188,7 @@ class VotingServer:
         voting_mode = database.get_setting(db, "voting_mode", "star")
         election_title  = database.get_setting(db, "election_title", "")
         election_active = database.get_setting(db, "election_active", "1") == "1"
+        show_author     = database.get_setting(db, "show_author",     "1") == "1"
         round_row = database.current_round(db)
         if not round_row:
             return {}
@@ -262,6 +263,7 @@ class VotingServer:
                 len(winners_data) >= n_winners or round_status == "complete"
             ),
             "election_active": election_active,
+            "show_author": show_author,
         }
 
     # ── Voting algorithms ─────────────────────────────────────────────────────
@@ -376,6 +378,9 @@ class VotingServer:
         r.add_delete(
             "/api/admin/sets/{id}/items/{item_id}", self._admin_delete_set_item
         )
+        r.add_put(
+            "/api/admin/sets/{id}/items/{item_id}", self._admin_update_set_item
+        )
         r.add_post("/api/admin/sets/{id}/save-current", self._admin_save_current_to_set)
         r.add_post("/api/admin/sets/{id}/load", self._admin_load_set)
         r.add_post("/api/admin/sets/{id}/reorder", self._admin_reorder_set)
@@ -388,6 +393,7 @@ class VotingServer:
         r.add_post("/api/admin/reveal", self._admin_reveal_winner)
         r.add_post("/api/admin/reset", self._admin_reset)
         r.add_get("/api/admin/elections", self._admin_get_elections)
+        r.add_delete("/api/admin/elections/{id}", self._admin_delete_election)
         r.add_post("/api/admin/unsubmit", self._admin_unsubmit)
         r.add_post("/api/admin/upload-image", self._admin_upload_image)
         r.add_get("/api/my-scores", self._get_my_scores)
@@ -700,6 +706,11 @@ class VotingServer:
                 "INSERT OR REPLACE INTO settings VALUES ('election_active', ?)",
                 ("1" if data["election_active"] else "0",),
             )
+        if "show_author" in data:
+            db.execute(
+                "INSERT OR REPLACE INTO settings VALUES ('show_author', ?)",
+                ("1" if data["show_author"] else "0",),
+            )
         db.commit()
         await self._broadcast("state_update", self._build_state(db))
         return web.json_response({"ok": True})
@@ -935,6 +946,13 @@ class VotingServer:
             )
         return web.json_response(elections)
 
+    async def _admin_delete_election(self, request: web.Request) -> web.Response:
+        db = request["db"]
+        election_id = int(request.match_info["id"])
+        db.execute("DELETE FROM elections WHERE id = ?", (election_id,))
+        db.commit()
+        return web.json_response({"ok": True})
+
     # ── Candidate sets ────────────────────────────────────────────────────────
 
     def _set_items(self, db: sqlite3.Connection, set_id: int) -> list[dict]:
@@ -1038,6 +1056,31 @@ class VotingServer:
         db = request["db"]
         item_id = int(request.match_info["item_id"])
         db.execute("DELETE FROM candidate_set_items WHERE id = ?", (item_id,))
+        db.commit()
+        return web.json_response({"ok": True})
+
+    async def _admin_update_set_item(self, request: web.Request) -> web.Response:
+        db = request["db"]
+        item_id = int(request.match_info["item_id"])
+        set_id = int(request.match_info["id"])
+        if not db.execute(
+            "SELECT 1 FROM candidate_set_items WHERE id = ? AND set_id = ?",
+            (item_id, set_id),
+        ).fetchone():
+            return web.json_response({"error": "Item not found"}, status=404)
+        data = await request.json()
+        title = (data.get("title") or "").strip()
+        if not title:
+            return web.json_response({"error": "Title required"}, status=400)
+        db.execute(
+            "UPDATE candidate_set_items SET title=?, body=?, author=? WHERE id=?",
+            (
+                title,
+                (data.get("body") or "").strip(),
+                (data.get("author") or "").strip() or None,
+                item_id,
+            ),
+        )
         db.commit()
         return web.json_response({"ok": True})
 
