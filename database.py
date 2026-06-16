@@ -28,7 +28,8 @@ def init_db(path: Path) -> None:
                 ('n_winners',       '1'),
                 ('voting_mode',     'star'),
                 ('election_title',  ''),
-                ('election_active', '1'),
+                ('election_state',  'ELECTION_ACTIVE'),
+                ('entry_context',   ''),
                 ('show_author',     '1');
 
             CREATE TABLE IF NOT EXISTS candidates (
@@ -106,6 +107,14 @@ def init_db(path: Path) -> None:
                 voter_name      TEXT NOT NULL,
                 candidate_title TEXT NOT NULL,
                 score           INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS candidate_entries (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                entry_type   TEXT NOT NULL,
+                value        TEXT NOT NULL,
+                submitted_by TEXT,
+                created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
 
             CREATE TABLE IF NOT EXISTS candidate_sets (

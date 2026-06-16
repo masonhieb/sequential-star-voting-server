@@ -301,11 +301,16 @@ input[type="file"]::file-selector-button {
       <input type="number" id="n-winners-input" min="1" value="1">
     </div>
     <div class="settings-row" style="margin-bottom:.9rem">
-      <label for="election-active-toggle" style="cursor:pointer">Election Active:</label>
-      <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;font-weight:400">
-        <input type="checkbox" id="election-active-toggle" checked style="width:1.1rem;height:1.1rem;cursor:pointer;accent-color:var(--success)">
-        <span id="election-active-label" style="font-size:.88rem;color:var(--muted)">Voting is open</span>
-      </label>
+      <label for="election-state-select">Election State:</label>
+      <select id="election-state-select" style="flex:1;max-width:340px">
+        <option value="ELECTION_ACTIVE">Voting is open (ELECTION_ACTIVE)</option>
+        <option value="ELECTION_INACTIVE">Voting is closed (ELECTION_INACTIVE)</option>
+        <option value="CANDIDATE_ENTRY_NAMES">Candidate entry — Names (CANDIDATE_ENTRY_NAMES)</option>
+      </select>
+    </div>
+    <div class="settings-row" style="margin-bottom:.9rem;align-items:flex-start">
+      <label for="entry-context-input" style="padding-top:.4rem;white-space:nowrap">Entry context text:</label>
+      <textarea id="entry-context-input" rows="2" placeholder="Instructions or context shown at the top of the ballot page during entry modes…" style="flex:1;min-width:180px;font-size:.88rem"></textarea>
     </div>
     <div class="settings-row" style="margin-bottom:.9rem">
       <label for="show-author-toggle" style="cursor:pointer">Show Author:</label>
@@ -404,6 +409,17 @@ input[type="file"]::file-selector-button {
       <button class="btn btn-danger" id="unsubmit-btn" disabled>Unsubmit</button>
     </div>
     <span class="msg" id="unsubmit-msg" style="display:block;margin-top:.5rem"></span>
+  </div>
+
+  <!-- Import voters -->
+  <div class="card">
+    <h2>Import Voters</h2>
+    <p style="font-size:.85rem;color:var(--muted);margin-bottom:.75rem">Upload a plain-text file with one voter per line: <code style="font-size:.82rem;background:var(--surface2);padding:.1em .4em;border-radius:4px">First Last</code>. Existing names are skipped.</p>
+    <div style="display:flex;gap:.75rem;align-items:center;flex-wrap:wrap">
+      <input type="file" id="voters-file-input" accept=".txt,text/plain">
+      <button class="btn" id="import-voters-btn">Import</button>
+      <span class="msg" id="import-voters-msg"></span>
+    </div>
   </div>
 
   <!-- Election history -->
@@ -510,9 +526,8 @@ async function loadSettings() {
     const mode = s.voting_mode || 'star';
     document.querySelector(`input[name="voting-mode"][value="${mode}"]`).checked = true;
     document.getElementById('election-title-input').value = s.election_title || '';
-    const active = s.election_active !== false;
-    document.getElementById('election-active-toggle').checked = active;
-    document.getElementById('election-active-label').textContent = active ? 'Voting is open' : 'Voting is closed';
+    document.getElementById('election-state-select').value = s.election_state || 'ELECTION_ACTIVE';
+    document.getElementById('entry-context-input').value = s.entry_context || '';
     const showAuthor = s.show_author !== false;
     document.getElementById('show-author-toggle').checked = showAuthor;
     document.getElementById('show-author-label').textContent = showAuthor ? 'Author shown on ballot' : 'Author hidden on ballot';
@@ -523,9 +538,6 @@ async function loadSettings() {
   } catch(e) {}
 }
 
-document.getElementById('election-active-toggle').addEventListener('change', e => {
-  document.getElementById('election-active-label').textContent = e.target.checked ? 'Voting is open' : 'Voting is closed';
-});
 document.getElementById('show-author-toggle').addEventListener('change', e => {
   document.getElementById('show-author-label').textContent = e.target.checked ? 'Author shown on ballot' : 'Author hidden on ballot';
 });
@@ -540,7 +552,7 @@ document.getElementById('save-settings-btn').addEventListener('click', async () 
     const r = await fetch('/api/admin/settings', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({voter_name: 'Mason Hieb', n_winners: n, voting_mode: mode, election_title: title, election_active: document.getElementById('election-active-toggle').checked, show_author: document.getElementById('show-author-toggle').checked})
+      body: JSON.stringify({voter_name: 'Mason Hieb', n_winners: n, voting_mode: mode, election_title: title, election_state: document.getElementById('election-state-select').value, entry_context: document.getElementById('entry-context-input').value.trim(), show_author: document.getElementById('show-author-toggle').checked})
     });
     const d = await r.json();
     showMsg(msg, r.ok ? 'Saved!' : (d.error || 'Error'), r.ok);
@@ -1091,6 +1103,29 @@ document.getElementById('edit-item-save-btn').addEventListener('click', async ()
     closeEditItemModal();
     loadSets();
   } catch(e) { btn.disabled = false; showMsg(msg, 'Network error', false); }
+});
+
+// ── Import voters ────────────────────────────────────────────────────────────
+document.getElementById('import-voters-btn').addEventListener('click', async () => {
+  const fileInput = document.getElementById('voters-file-input');
+  const msg = document.getElementById('import-voters-msg');
+  if (!fileInput.files[0]) { showMsg(msg, 'Select a file first', false); return; }
+  const btn = document.getElementById('import-voters-btn');
+  btn.disabled = true;
+  const form = new FormData();
+  form.append('voters_file', fileInput.files[0]);
+  try {
+    const r = await fetch('/api/admin/import-voters', {method: 'POST', body: form});
+    const d = await r.json();
+    if (!r.ok) { showMsg(msg, d.error || 'Error', false); }
+    else {
+      const parts = [`Imported ${d.imported}`, `skipped ${d.skipped}`];
+      if (d.invalid) parts.push(`${d.invalid} invalid`);
+      showMsg(msg, parts.join(', '), true);
+      fileInput.value = '';
+    }
+  } catch(e) { showMsg(msg, 'Network error', false); }
+  btn.disabled = false;
 });
 
 // ── Unsubmit ballot ─────────────────────────────────────────────────────────

@@ -271,6 +271,30 @@ header {
   white-space: nowrap;
 }
 
+/* ── Context notice ──────────────────────────────────────────── */
+#context-notice {
+  background: #1a1040;
+  border: 1px solid #3730a3;
+  border-radius: 8px;
+  color: #c7d2fe;
+  font-size: .9rem;
+  line-height: 1.5;
+  padding: .75rem 1rem;
+  margin-bottom: 1rem;
+  white-space: pre-wrap;
+}
+
+/* ── Entry section ───────────────────────────────────────────── */
+#entry-section { display: none; }
+#entry-form-row { display: flex; gap: .75rem; margin-bottom: .75rem; }
+#entry-input { flex: 1; }
+#my-entries-list { font-size: .88rem; }
+#my-entries-list .entry-item {
+  padding: .3rem 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+}
+
 /* ── Submit section ──────────────────────────────────────────── */
 #submit-section {
   padding: .25rem 0 1.5rem;
@@ -501,6 +525,15 @@ header {
     <!-- Voting area -->
     <div id="voting-area">
       <h2 id="vote-heading">Cast Your Ballot</h2>
+      <div id="context-notice" style="display:none"></div>
+      <div id="entry-section">
+        <div id="entry-form-row">
+          <input type="text" id="entry-input" placeholder="Enter a name…">
+          <button class="btn" id="entry-submit-btn">Submit</button>
+        </div>
+        <div id="entry-msg" class="error-msg" style="display:none"></div>
+        <div id="my-entries-list"></div>
+      </div>
       <div id="candidates-list"></div>
       <div id="submit-section">
         <div id="voting-closed-notice">
@@ -710,9 +743,15 @@ function detectSubmitted() {
 }
 
 // ── Rendering ──────────────────────────────────────────────────────────────
+function isEntryMode() {
+  return !!(state && state.election_state && state.election_state.startsWith('CANDIDATE_ENTRY_'));
+}
+
 function renderAll() {
   if (!state) return;
   renderRoundBadge();
+  renderContextNotice();
+  renderEntrySection();
   renderCandidates();
   renderVoters();
   renderWinners();
@@ -732,21 +771,65 @@ function renderRoundBadge() {
   if (state.election_complete) {
     el.textContent = 'Election Complete';
     el.style.color = 'var(--success)';
+    el.style.display = '';
   } else if (isScore) {
     el.textContent = `Top ${state.n_winners} — Single Round`;
     el.style.color = '';
+    el.style.display = '';
+  } else if (state.n_winners === 1) {
+    el.style.display = 'none';
   } else {
     el.textContent = `Round ${state.round_number} of ${state.n_winners}`;
     el.style.color = '';
+    el.style.display = '';
   }
 
-  document.getElementById('vote-heading').textContent =
-    state.election_complete ? 'Final Results' : 'Cast Your Ballot';
+  if (isEntryMode()) {
+    const labels = {CANDIDATE_ENTRY_NAMES: 'Submit a Name'};
+    document.getElementById('vote-heading').textContent = labels[state.election_state] || 'Submit Entry';
+    document.getElementById('round-badge').textContent = 'Entry Phase';
+    document.getElementById('round-badge').style.color = 'var(--primary-h)';
+  } else {
+    document.getElementById('vote-heading').textContent =
+      state.election_complete ? 'Final Results' : 'Cast Your Ballot';
+  }
+}
+
+function renderContextNotice() {
+  const el = document.getElementById('context-notice');
+  const ctx = state.entry_context || '';
+  el.style.display = ctx ? '' : 'none';
+  el.textContent = ctx;
+}
+
+let myEntries = [];
+
+function renderEntrySection() {
+  const el = document.getElementById('entry-section');
+  el.style.display = isEntryMode() ? '' : 'none';
+  if (isEntryMode()) renderMyEntries();
+}
+
+function renderMyEntries() {
+  const el = document.getElementById('my-entries-list');
+  if (!myEntries.length) { el.innerHTML = ''; return; }
+  el.innerHTML =
+    `<div style="font-size:.8rem;color:var(--muted);margin-bottom:.3rem">Your submissions this session:</div>` +
+    myEntries.map(v => `<div class="entry-item">${esc(v)}</div>`).join('');
 }
 
 function renderCandidates() {
   const list = document.getElementById('candidates-list');
-  if (state.election_complete || hasSubmitted || !state.election_active) {
+  if (isEntryMode()) {
+    if (!state.candidates.length) { list.innerHTML = ''; return; }
+    list.innerHTML =
+      `<div style="font-size:.8rem;color:var(--muted);margin-bottom:.5rem">Submitted so far (${state.candidates.length}):</div>` +
+      state.candidates.map(c =>
+        `<div style="padding:.3rem 0;border-bottom:1px solid var(--border);font-size:.9rem">${esc(c.title)}${c.author ? `<span style="color:var(--muted);font-size:.8rem"> — ${esc(c.author)}</span>` : ''}</div>`
+      ).join('');
+    return;
+  }
+  if (state.election_complete || hasSubmitted || state.election_state !== 'ELECTION_ACTIVE') {
     list.innerHTML = '';
     return;
   }
@@ -821,13 +904,17 @@ function applyScore(card, cid, score) {
 
 function updateSubmitBtn() {
   if (!state) return;
-  const all = state.candidates.every(c => scores[c.id] !== undefined);
   const btn = document.getElementById('submit-btn');
-  if (btn) btn.disabled = !all;
   const info = document.getElementById('submit-info');
+  const noCands = state.candidates.length === 0;
   const missing = state.candidates.filter(c => scores[c.id] === undefined).length;
+  const ready = !noCands && missing === 0;
+  if (btn) btn.disabled = !ready;
   if (info) {
-    if (missing === 0) {
+    if (noCands) {
+      info.textContent = 'No candidates have been added yet.';
+      info.className = 'sidebar-stat warn';
+    } else if (ready) {
       info.textContent = 'All candidates scored. Ready to submit!';
       info.className = 'sidebar-stat';
     } else {
@@ -850,8 +937,8 @@ function renderSubmitSection() {
     submitBtn.style.display = 'none';
     info.style.display      = 'none';
     banner.style.display    = '';
-  } else if (!state.election_active) {
-    closed.style.display    = '';
+  } else if (isEntryMode() || state.election_state !== 'ELECTION_ACTIVE') {
+    closed.style.display    = isEntryMode() ? 'none' : '';
     notice.style.display    = 'none';
     submitBtn.style.display = 'none';
     info.style.display      = 'none';
@@ -944,6 +1031,43 @@ document.getElementById('submit-btn').addEventListener('click', async () => {
   document.getElementById('submit-btn').disabled = false;
 });
 
+
+// ── Entry submission ────────────────────────────────────────────────────────
+document.getElementById('entry-submit-btn').addEventListener('click', submitEntry);
+document.getElementById('entry-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') submitEntry();
+});
+
+async function submitEntry() {
+  const input = document.getElementById('entry-input');
+  const value = input.value.trim();
+  if (!value) return;
+  const btn = document.getElementById('entry-submit-btn');
+  const msg = document.getElementById('entry-msg');
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/entry', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({voter_name: voterName, value})
+    });
+    const d = await r.json();
+    if (!r.ok) {
+      msg.textContent = d.error || 'Error';
+      msg.style.display = '';
+      setTimeout(() => { msg.style.display = 'none'; }, 3000);
+    } else {
+      myEntries.unshift(value);
+      input.value = '';
+      renderMyEntries();
+    }
+  } catch(e) {
+    msg.textContent = 'Network error';
+    msg.style.display = '';
+    setTimeout(() => { msg.style.display = 'none'; }, 3000);
+  }
+  btn.disabled = false;
+}
 
 // ── Winner overlay ─────────────────────────────────────────────────────────
 function showWinnerOverlay(winner) {

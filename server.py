@@ -187,7 +187,8 @@ class VotingServer:
         n_winners = int(database.get_setting(db, "n_winners", "1"))
         voting_mode = database.get_setting(db, "voting_mode", "star")
         election_title  = database.get_setting(db, "election_title", "")
-        election_active = database.get_setting(db, "election_active", "1") == "1"
+        election_state  = database.get_setting(db, "election_state", "ELECTION_ACTIVE")
+        entry_context   = database.get_setting(db, "entry_context",  "")
         show_author     = database.get_setting(db, "show_author",     "1") == "1"
         round_row = database.current_round(db)
         if not round_row:
@@ -262,7 +263,8 @@ class VotingServer:
             "election_complete": (
                 len(winners_data) >= n_winners or round_status == "complete"
             ),
-            "election_active": election_active,
+            "election_state": election_state,
+            "entry_context": entry_context,
             "show_author": show_author,
         }
 
@@ -395,7 +397,9 @@ class VotingServer:
         r.add_get("/api/admin/elections", self._admin_get_elections)
         r.add_delete("/api/admin/elections/{id}", self._admin_delete_election)
         r.add_post("/api/admin/unsubmit", self._admin_unsubmit)
+        r.add_post("/api/entry", self._submit_entry)
         r.add_post("/api/admin/upload-image", self._admin_upload_image)
+        r.add_post("/api/admin/import-voters", self._admin_import_voters)
         r.add_get("/api/my-scores", self._get_my_scores)
         r.add_static("/images", self.images_dir, name="images")
 
@@ -570,8 +574,8 @@ class VotingServer:
         if not voter:
             return web.json_response({"error": "Voter not found"}, status=404)
 
-        if database.get_setting(db, "election_active", "1") != "1":
-            return web.json_response({"error": "Voting is not open yet"}, status=403)
+        if database.get_setting(db, "election_state", "ELECTION_ACTIVE") != "ELECTION_ACTIVE":
+            return web.json_response({"error": "Voting is not open"}, status=403)
 
         round_row = database.current_round(db)
         if not round_row or round_row["status"] != "voting":
@@ -701,10 +705,18 @@ class VotingServer:
                 "INSERT OR REPLACE INTO settings VALUES ('election_title', ?)",
                 (str(data["election_title"]).strip(),),
             )
-        if "election_active" in data:
+        if "election_state" in data:
+            valid = {"ELECTION_ACTIVE", "ELECTION_INACTIVE", "CANDIDATE_ENTRY_NAMES"}
+            if data["election_state"] not in valid:
+                return web.json_response({"error": "Invalid election_state"}, status=400)
             db.execute(
-                "INSERT OR REPLACE INTO settings VALUES ('election_active', ?)",
-                ("1" if data["election_active"] else "0",),
+                "INSERT OR REPLACE INTO settings VALUES ('election_state', ?)",
+                (data["election_state"],),
+            )
+        if "entry_context" in data:
+            db.execute(
+                "INSERT OR REPLACE INTO settings VALUES ('entry_context', ?)",
+                (str(data["entry_context"]).strip(),),
             )
         if "show_author" in data:
             db.execute(
@@ -1220,6 +1232,62 @@ class VotingServer:
         db.commit()
         await self._broadcast("state_update", self._build_state(db))
         return web.json_response({"ok": True})
+
+    async def _submit_entry(self, request: web.Request) -> web.Response:
+        db = request["db"]
+        election_state = database.get_setting(db, "election_state", "ELECTION_ACTIVE")
+        if not election_state.startswith("CANDIDATE_ENTRY_"):
+            return web.json_response({"error": "Not in candidate entry mode"}, status=400)
+        data = await request.json()
+        value = (data.get("value") or "").strip()
+        voter_name = (data.get("voter_name") or "").strip() or None
+        if not value:
+            return web.json_response({"error": "Value required"}, status=400)
+        db.execute(
+            "INSERT INTO candidates (title, body, author, image_path) VALUES (?,?,?,?)",
+            (value, "", voter_name, None),
+        )
+        db.commit()
+        await self._broadcast("state_update", self._build_state(db))
+        return web.json_response({"ok": True})
+
+    async def _admin_import_voters(self, request: web.Request) -> web.Response:
+        db = request["db"]
+        reader = await request.multipart()
+        lines = None
+        async for field in reader:
+            if field.name == "voters_file":
+                data = await field.read()
+                lines = data.decode("utf-8", errors="replace").splitlines()
+                break
+        if lines is None:
+            return web.json_response({"error": "No file provided"}, status=400)
+        imported = skipped = invalid = 0
+        for raw in lines:
+            line = raw.strip()
+            if not line:
+                continue
+            parts = line.split(None, 1)
+            if len(parts) < 2:
+                invalid += 1
+                continue
+            first_name = parts[0].strip()
+            last_name = parts[1].strip()
+            if not first_name or not last_name:
+                invalid += 1
+                continue
+            name_lower = f"{first_name} {last_name}".lower()
+            if db.execute("SELECT 1 FROM voters WHERE name_lower = ?", (name_lower,)).fetchone():
+                skipped += 1
+                continue
+            db.execute(
+                "INSERT INTO voters (first_name, last_name, name_lower) VALUES (?,?,?)",
+                (first_name, last_name, name_lower),
+            )
+            imported += 1
+        db.commit()
+        await self._broadcast("voters_update", self._build_voters_data(db))
+        return web.json_response({"ok": True, "imported": imported, "skipped": skipped, "invalid": invalid})
 
     async def _admin_upload_image(self, request: web.Request) -> web.Response:
         reader = await request.multipart()
