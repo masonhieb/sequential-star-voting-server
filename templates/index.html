@@ -272,7 +272,7 @@ header {
 }
 
 /* ── Context notice ──────────────────────────────────────────── */
-#context-notice {
+#context-notice, #codename-notice {
   background: #1a1040;
   border: 1px solid #3730a3;
   border-radius: 8px;
@@ -499,7 +499,7 @@ header {
       </div>
       <div id="name-error" class="error-msg" style="display:none"></div>
       <button class="btn" id="name-submit-btn">Join</button>
-      <div class="divider">— or select your name —</div>
+      <div class="divider">or select your name</div>
       <select id="name-select">
         <option value="">Loading…</option>
       </select>
@@ -526,6 +526,7 @@ header {
     <div id="voting-area">
       <h2 id="vote-heading">Cast Your Ballot</h2>
       <div id="context-notice" style="display:none"></div>
+      <div id="codename-notice" style="display:none"></div>
       <div id="entry-section">
         <div id="entry-form-row">
           <input type="text" id="entry-input" placeholder="Enter a name…">
@@ -615,9 +616,9 @@ async function loadExistingVoters() {
     const voters = await r.json();
     const sel = document.getElementById('name-select');
     if (voters.length === 0) {
-      sel.innerHTML = '<option value="">No names yet — be the first!</option>';
+      sel.innerHTML = '<option value="">No names yet. Be the first!</option>';
     } else {
-      sel.innerHTML = '<option value="">— pick a name —</option>' +
+      sel.innerHTML = '<option value="">Select a name</option>' +
         voters.map(v => `<option value="${esc(v.name)}">${esc(v.name)}</option>`).join('');
     }
   } catch(e) { /* ignore */ }
@@ -744,13 +745,20 @@ function detectSubmitted() {
 
 // ── Rendering ──────────────────────────────────────────────────────────────
 function isEntryMode() {
-  return !!(state && state.election_state && state.election_state.startsWith('CANDIDATE_ENTRY_'));
+  return !!(state && state.election_state &&
+    (state.election_state.startsWith('CANDIDATE_ENTRY_') ||
+     state.election_state === 'CODENAME_SUBMISSION'));
+}
+
+function isCodenameSubmission() {
+  return !!(state && state.election_state === 'CODENAME_SUBMISSION');
 }
 
 function renderAll() {
   if (!state) return;
   renderRoundBadge();
   renderContextNotice();
+  renderCodenameNotice();
   renderEntrySection();
   renderCandidates();
   renderVoters();
@@ -762,7 +770,9 @@ function renderRoundBadge() {
   const isScore = state.voting_mode === 'score';
 
   // Titles
-  const modeTitle = isScore ? 'Multi-Winner Score Voting' : 'STAR Voting Tool';
+  const modeTitle = state.app_mode === 'codenaming'
+    ? 'Company Codenaming'
+    : (isScore ? 'Multi-Winner Score Voting' : 'STAR Voting Tool');
   document.getElementById('site-title').textContent = modeTitle;
   document.title = modeTitle;
 
@@ -773,7 +783,7 @@ function renderRoundBadge() {
     el.style.color = 'var(--success)';
     el.style.display = '';
   } else if (isScore) {
-    el.textContent = `Top ${state.n_winners} — Single Round`;
+    el.textContent = `Top ${state.n_winners}, Single Round`;
     el.style.color = '';
     el.style.display = '';
   } else if (state.n_winners === 1) {
@@ -784,10 +794,21 @@ function renderRoundBadge() {
     el.style.display = '';
   }
 
-  if (isEntryMode()) {
+  if (isCodenameSubmission()) {
+    const letter = state.codename_required_letter;
+    document.getElementById('vote-heading').textContent = letter
+      ? `Submit a "${letter}" Codename`
+      : 'Submit a Codename';
+    document.getElementById('round-badge').textContent = letter
+      ? `Codenaming: Letter ${letter}`
+      : 'Codenaming';
+    document.getElementById('round-badge').style.display = '';
+    document.getElementById('round-badge').style.color = 'var(--primary-h)';
+  } else if (isEntryMode()) {
     const labels = {CANDIDATE_ENTRY_NAMES: 'Submit a Name'};
     document.getElementById('vote-heading').textContent = labels[state.election_state] || 'Submit Entry';
     document.getElementById('round-badge').textContent = 'Entry Phase';
+    document.getElementById('round-badge').style.display = '';
     document.getElementById('round-badge').style.color = 'var(--primary-h)';
   } else {
     document.getElementById('vote-heading').textContent =
@@ -802,12 +823,40 @@ function renderContextNotice() {
   el.textContent = ctx;
 }
 
+function renderCodenameNotice() {
+  const el = document.getElementById('codename-notice');
+  if (!isCodenameSubmission()) { el.style.display = 'none'; return; }
+
+  const letter = state.codename_required_letter;
+  let msg;
+  if (state.codename_enforce_letter && letter) {
+    msg = `All codenames must be tree names starting with "${letter}".`;
+  } else if (state.codename_enforce_letter) {
+    msg = 'Submit a tree name as the codename for this round.';
+  } else {
+    msg = 'Any tree name is accepted as a codename this round.';
+  }
+
+  const used = state.codename_used_for_letter || [];
+  if (used.length) {
+    const niceNames = used.map(c => esc(c.charAt(0).toUpperCase() + c.slice(1)));
+    msg += `\n\nAlready-used codenames${letter ? ` starting with "${letter}"` : ''}: ${niceNames.join(', ')}`;
+  }
+
+  el.textContent = msg;
+  el.style.display = '';
+}
+
 let myEntries = [];
 
 function renderEntrySection() {
   const el = document.getElementById('entry-section');
-  el.style.display = isEntryMode() ? '' : 'none';
-  if (isEntryMode()) renderMyEntries();
+  el.style.display = isEntryMode() ? 'block' : 'none';
+  if (isEntryMode()) {
+    document.getElementById('entry-input').placeholder =
+      isCodenameSubmission() ? 'Enter a tree name…' : 'Enter a name…';
+    renderMyEntries();
+  }
 }
 
 function renderMyEntries() {
@@ -824,9 +873,17 @@ function renderCandidates() {
     if (!state.candidates.length) { list.innerHTML = ''; return; }
     list.innerHTML =
       `<div style="font-size:.8rem;color:var(--muted);margin-bottom:.5rem">Submitted so far (${state.candidates.length}):</div>` +
-      state.candidates.map(c =>
-        `<div style="padding:.3rem 0;border-bottom:1px solid var(--border);font-size:.9rem">${esc(c.title)}${c.author ? `<span style="color:var(--muted);font-size:.8rem"> — ${esc(c.author)}</span>` : ''}</div>`
-      ).join('');
+      state.candidates.map(c => {
+        const isMine = isCodenameSubmission() && voterName &&
+          (c.author || '').trim().toLowerCase() === voterName.trim().toLowerCase();
+        const deleteBtn = isMine
+          ? `<button style="margin-left:.5rem;font-size:.75rem;padding:.1rem .4rem;cursor:pointer;background:none;border:1px solid var(--danger);color:var(--danger);border-radius:3px;line-height:1" onclick="deleteMyCodename(${c.id}, this)">Delete</button>`
+          : '';
+        return `<div style="display:flex;align-items:center;padding:.3rem 0;border-bottom:1px solid var(--border);font-size:.9rem">
+          <span style="flex:1">${esc(c.title)}${c.author ? `<span style="color:var(--muted);font-size:.8rem">: ${esc(c.author)}</span>` : ''}</span>
+          ${deleteBtn}
+        </div>`;
+      }).join('');
     return;
   }
   if (state.election_complete || hasSubmitted || state.election_state !== 'ELECTION_ACTIVE') {
@@ -872,7 +929,7 @@ function buildCandidateCard(c) {
         <button class="score-btn" data-score="4" title="4 stars">&#9733;&#9733;&#9733;&#9733;</button>
         <button class="score-btn" data-score="5" title="5 stars">&#9733;&#9733;&#9733;&#9733;&#9733;</button>
       </div>
-      <span class="score-current" id="score-current-${c.id}">—</span>
+      <span class="score-current" id="score-current-${c.id}">-</span>
     </div>
   `;
 
@@ -897,7 +954,7 @@ function applyScore(card, cid, score) {
   });
   const labels = ['No support','1 star','2 stars','3 stars','4 stars','5 stars'];
   const el = document.getElementById(`score-current-${cid}`);
-  if (el) el.textContent = labels[score] || '—';
+  if (el) el.textContent = labels[score] || '-';
   card.classList.toggle('scored', true);
   card.classList.remove('unscored-warn');
 }
@@ -1038,6 +1095,18 @@ document.getElementById('entry-input').addEventListener('keydown', e => {
   if (e.key === 'Enter') submitEntry();
 });
 
+async function deleteMyCodename(id, btn) {
+  btn.disabled = true;
+  try {
+    const r = await fetch(`/api/codename/candidate/${id}`, {
+      method: 'DELETE',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({voter_name: voterName})
+    });
+    if (!r.ok) { const d = await r.json(); alert(d.error || 'Error'); btn.disabled = false; }
+  } catch(e) { alert('Network error'); btn.disabled = false; }
+}
+
 async function submitEntry() {
   const input = document.getElementById('entry-input');
   const value = input.value.trim();
@@ -1046,7 +1115,8 @@ async function submitEntry() {
   const msg = document.getElementById('entry-msg');
   btn.disabled = true;
   try {
-    const r = await fetch('/api/entry', {
+    const url = isCodenameSubmission() ? '/api/codename/submit' : '/api/entry';
+    const r = await fetch(url, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({voter_name: voterName, value})
@@ -1096,7 +1166,7 @@ function showWinnerOverlay(winner) {
 }
 
 function showScoreWinnersOverlay(winners) {
-  // Score mode: all top-N revealed at once — show ranked list with scores table
+  // Score mode: all top-N revealed at once; show ranked list with scores table
   document.getElementById('overlay-label').textContent = `Top ${winners.length} Results`;
   document.getElementById('overlay-winner-name').textContent =
     winners.map((w, i) => `${ordinal(i + 1)}: ${w.candidate_title}`).join('\n');
@@ -1142,7 +1212,9 @@ async function init() {
     if (r.ok) {
       const s = await r.json();
       const isScore = s.voting_mode === 'score';
-      const title = isScore ? 'Multi-Winner Score Voting' : 'STAR Voting Tool';
+      const title = s.app_mode === 'codenaming'
+        ? 'Company Codenaming'
+        : (isScore ? 'Multi-Winner Score Voting' : 'STAR Voting Tool');
       document.getElementById('name-card-title').textContent = title;
       document.title = title;
     }

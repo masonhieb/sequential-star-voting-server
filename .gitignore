@@ -208,3 +208,6 @@ marimo/_lsp/
 __marimo__/
 
 push-to-production.sh
+
+# Internal design docs — not for github
+COMPANY_CODENAMING_DESIGN.md

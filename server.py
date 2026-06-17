@@ -190,6 +190,26 @@ class VotingServer:
         election_state  = database.get_setting(db, "election_state", "ELECTION_ACTIVE")
         entry_context   = database.get_setting(db, "entry_context",  "")
         show_author     = database.get_setting(db, "show_author",     "1") == "1"
+
+        # Company codenaming mode: only the derived letter (and codenames
+        # already used for it) are public. The real company name
+        # (settings.codename_company_name) is deliberately never read into
+        # this dict — it's admin-only, via GET /api/admin/codename.
+        app_mode = database.get_setting(db, "app_mode", "standard")
+        codename_enforce_letter = (
+            database.get_setting(db, "codename_enforce_letter", "1") == "1"
+        )
+        codename_required_letter = None
+        codename_used_for_letter: list[str] = []
+        if app_mode == "codenaming":
+            codename_required_letter = database.codename_required_letter(
+                database.get_setting(db, "codename_company_name", "")
+            )
+            if codename_required_letter:
+                codename_used_for_letter = database.codenames_for_letter(
+                    db, codename_required_letter
+                )
+
         round_row = database.current_round(db)
         if not round_row:
             return {}
@@ -266,6 +286,10 @@ class VotingServer:
             "election_state": election_state,
             "entry_context": entry_context,
             "show_author": show_author,
+            "app_mode": app_mode,
+            "codename_required_letter": codename_required_letter,
+            "codename_enforce_letter": codename_enforce_letter,
+            "codename_used_for_letter": codename_used_for_letter,
         }
 
     # ── Voting algorithms ─────────────────────────────────────────────────────
@@ -401,6 +425,29 @@ class VotingServer:
         r.add_post("/api/admin/upload-image", self._admin_upload_image)
         r.add_post("/api/admin/import-voters", self._admin_import_voters)
         r.add_get("/api/my-scores", self._get_my_scores)
+        r.add_post("/api/codename/submit", self._submit_codename)
+        r.add_delete("/api/codename/candidate/{id}", self._delete_own_codename)
+        r.add_get("/api/admin/codename", self._admin_codename_get)
+        r.add_post("/api/admin/codename/configure", self._admin_codename_configure)
+        r.add_post("/api/admin/codename/history", self._admin_codename_add_history)
+        r.add_delete(
+            "/api/admin/codename/history/{id}",
+            self._admin_codename_delete_history,
+        )
+        r.add_get("/api/admin/codename/pool", self._admin_codename_pool_get)
+        r.add_post("/api/admin/codename/pool", self._admin_codename_pool_add)
+        r.add_put("/api/admin/codename/pool/{id}", self._admin_codename_pool_update)
+        r.add_delete("/api/admin/codename/pool/{id}", self._admin_codename_pool_delete)
+        r.add_post(
+            "/api/admin/codename/open-submissions",
+            self._admin_codename_open_submissions,
+        )
+        r.add_post(
+            "/api/admin/codename/start-voting", self._admin_codename_start_voting
+        )
+        r.add_post(
+            "/api/admin/codename/finish-round", self._admin_codename_finish_round
+        )
         r.add_static("/images", self.images_dir, name="images")
 
     async def _index(self, _request: web.Request) -> web.Response:
@@ -640,6 +687,11 @@ class VotingServer:
                 {"error": "Cannot delete a candidate that has received votes"},
                 status=400,
             )
+        if db.execute("SELECT 1 FROM winners WHERE candidate_id = ?", (cid,)).fetchone():
+            return web.json_response(
+                {"error": "Cannot delete a candidate that has been declared a winner — reset the election first"},
+                status=400,
+            )
         db.execute("DELETE FROM candidates WHERE id = ?", (cid,))
         db.commit()
         await self._broadcast("state_update", self._build_state(db))
@@ -706,7 +758,12 @@ class VotingServer:
                 (str(data["election_title"]).strip(),),
             )
         if "election_state" in data:
-            valid = {"ELECTION_ACTIVE", "ELECTION_INACTIVE", "CANDIDATE_ENTRY_NAMES"}
+            valid = {
+                "ELECTION_ACTIVE",
+                "ELECTION_INACTIVE",
+                "CANDIDATE_ENTRY_NAMES",
+                "CODENAME_SUBMISSION",
+            }
             if data["election_state"] not in valid:
                 return web.json_response({"error": "Invalid election_state"}, status=400)
             db.execute(
@@ -723,9 +780,42 @@ class VotingServer:
                 "INSERT OR REPLACE INTO settings VALUES ('show_author', ?)",
                 ("1" if data["show_author"] else "0",),
             )
+        if "app_mode" in data:
+            mode = data["app_mode"]
+            if mode not in ("standard", "codenaming"):
+                return web.json_response(
+                    {"error": "app_mode must be 'standard' or 'codenaming'"},
+                    status=400,
+                )
+            db.execute(
+                "INSERT OR REPLACE INTO settings VALUES ('app_mode', ?)", (mode,)
+            )
         db.commit()
         await self._broadcast("state_update", self._build_state(db))
         return web.json_response({"ok": True})
+
+    def _archive_codename(self, db: sqlite3.Connection, candidate_id: int) -> None:
+        """If we're in company-codenaming mode, permanently record the
+        winning codename (lowercased) against just the company's first
+        letter — never the company name itself. No-ops outside codenaming
+        mode, so it's safe to call unconditionally once a winner is known."""
+        if database.get_setting(db, "app_mode", "standard") != "codenaming":
+            return
+        letter = database.codename_required_letter(
+            database.get_setting(db, "codename_company_name", "")
+        )
+        if not letter:
+            return
+        cand = db.execute(
+            "SELECT title FROM candidates WHERE id = ?", (candidate_id,)
+        ).fetchone()
+        if not cand:
+            return
+        db.execute(
+            "INSERT OR IGNORE INTO selected_codenames (codename, company_first_letter)"
+            " VALUES (?, ?)",
+            (cand["title"].strip().lower(), letter),
+        )
 
     async def _admin_reveal_winner(self, request: web.Request) -> web.Response:
         db = request["db"]
@@ -733,6 +823,11 @@ class VotingServer:
         err = self._require_mason(data)
         if err:
             return err
+
+        if database.get_setting(db, "election_state", "") != "ELECTION_INACTIVE":
+            return web.json_response(
+                {"error": "Close voting before revealing the winner."}, status=400
+            )
 
         round_row = database.current_round(db)
         if not round_row or round_row["status"] != "voting":
@@ -774,6 +869,8 @@ class VotingServer:
             db.execute(
                 "UPDATE rounds SET status = 'complete' WHERE id = ?", (round_row["id"],)
             )
+            if ranked:
+                self._archive_codename(db, ranked[0]["candidate_id"])
         else:
             result = self._compute_star_winner(db, round_row["id"])
             if not result:
@@ -800,6 +897,7 @@ class VotingServer:
                     all_scores_json,
                 ),
             )
+            self._archive_codename(db, winner_id)
             new_count = existing_count + 1
             if new_count >= n_winners:
                 db.execute(
@@ -820,6 +918,94 @@ class VotingServer:
         await self._broadcast("state_update", self._build_state(db))
         return web.json_response({"ok": True})
 
+    def _archive_current_election(
+        self, db: sqlite3.Connection, title_override: Optional[str] = None
+    ) -> bool:
+        """Snapshot the current winners + per-voter ballots into
+        elections/election_results/election_ballots, the same permanent
+        history the admin's Election History card reads from. Returns False
+        (no-op) if there's nothing to archive. Callers are responsible for
+        wiping the live votes/ballots/winners/rounds afterward — this only
+        archives, it doesn't clean up.
+
+        `title_override` lets a caller (e.g. a finished codenaming round)
+        supply a synthetic, non-identifying title instead of falling back
+        to the `election_title` setting."""
+        if not db.execute("SELECT 1 FROM winners LIMIT 1").fetchone():
+            return False
+
+        title = title_override or (
+            database.get_setting(db, "election_title", "") or "Untitled Election"
+        )
+        voting_mode = database.get_setting(db, "voting_mode", "star")
+        n_winners = int(database.get_setting(db, "n_winners", "1"))
+        db.execute(
+            "INSERT INTO elections (title, voting_mode, n_winners) VALUES (?,?,?)",
+            (title, voting_mode, n_winners),
+        )
+        election_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
+        for w in db.execute("""SELECT w.round_number, w.total_score,
+                      w.finalist1_runoff_votes, w.finalist2_runoff_votes,
+                      w.all_scores,
+                      c.title  AS cand_title,
+                      f1.title AS f1_title,
+                      f2.title AS f2_title
+               FROM winners w
+               JOIN candidates c  ON w.candidate_id  = c.id
+               LEFT JOIN candidates f1 ON w.finalist1_id = f1.id
+               LEFT JOIN candidates f2 ON w.finalist2_id = f2.id
+               ORDER BY w.round_number""").fetchall():
+            raw = json.loads(w["all_scores"]) if w["all_scores"] else {}
+            resolved = []
+            for cid_str, score in sorted(raw.items(), key=lambda x: -x[1]):
+                cand = db.execute(
+                    "SELECT title FROM candidates WHERE id = ?", (int(cid_str),)
+                ).fetchone()
+                resolved.append(
+                    {"title": cand["title"] if cand else cid_str, "score": score}
+                )
+            db.execute(
+                """INSERT INTO election_results
+                   (election_id, place, candidate_title, total_score,
+                    finalist1_title, finalist1_runoff_votes,
+                    finalist2_title, finalist2_runoff_votes, all_scores)
+                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                (
+                    election_id,
+                    w["round_number"],
+                    w["cand_title"],
+                    w["total_score"],
+                    w["f1_title"],
+                    w["finalist1_runoff_votes"],
+                    w["f2_title"],
+                    w["finalist2_runoff_votes"],
+                    json.dumps(resolved),
+                ),
+            )
+        # Snapshot individual ballot scores
+        for row in db.execute(
+            """SELECT v.first_name || ' ' || v.last_name AS voter_name,
+                      c.title AS candidate_title,
+                      vt.score
+               FROM votes vt
+               JOIN voters    v ON vt.voter_id     = v.id
+               JOIN candidates c ON vt.candidate_id = c.id
+               JOIN ballots    b ON b.voter_id = vt.voter_id
+                               AND b.round_id = vt.round_id
+               ORDER BY v.name_lower, c.title"""
+        ).fetchall():
+            db.execute(
+                "INSERT INTO election_ballots (election_id, voter_name, candidate_title, score)"
+                " VALUES (?,?,?,?)",
+                (
+                    election_id,
+                    row["voter_name"],
+                    row["candidate_title"],
+                    row["score"],
+                ),
+            )
+        return True
+
     async def _admin_reset(self, request: web.Request) -> web.Response:
         db = request["db"]
         data = await request.json()
@@ -827,78 +1013,7 @@ class VotingServer:
         if err:
             return err
 
-        # Snapshot any completed winners into election history before wiping
-        if db.execute("SELECT 1 FROM winners LIMIT 1").fetchone():
-            title = (
-                database.get_setting(db, "election_title", "") or "Untitled Election"
-            )
-            voting_mode = database.get_setting(db, "voting_mode", "star")
-            n_winners = int(database.get_setting(db, "n_winners", "1"))
-            db.execute(
-                "INSERT INTO elections (title, voting_mode, n_winners) VALUES (?,?,?)",
-                (title, voting_mode, n_winners),
-            )
-            election_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
-            for w in db.execute("""SELECT w.round_number, w.total_score,
-                          w.finalist1_runoff_votes, w.finalist2_runoff_votes,
-                          w.all_scores,
-                          c.title  AS cand_title,
-                          f1.title AS f1_title,
-                          f2.title AS f2_title
-                   FROM winners w
-                   JOIN candidates c  ON w.candidate_id  = c.id
-                   LEFT JOIN candidates f1 ON w.finalist1_id = f1.id
-                   LEFT JOIN candidates f2 ON w.finalist2_id = f2.id
-                   ORDER BY w.round_number""").fetchall():
-                raw = json.loads(w["all_scores"]) if w["all_scores"] else {}
-                resolved = []
-                for cid_str, score in sorted(raw.items(), key=lambda x: -x[1]):
-                    cand = db.execute(
-                        "SELECT title FROM candidates WHERE id = ?", (int(cid_str),)
-                    ).fetchone()
-                    resolved.append(
-                        {"title": cand["title"] if cand else cid_str, "score": score}
-                    )
-                db.execute(
-                    """INSERT INTO election_results
-                       (election_id, place, candidate_title, total_score,
-                        finalist1_title, finalist1_runoff_votes,
-                        finalist2_title, finalist2_runoff_votes, all_scores)
-                       VALUES (?,?,?,?,?,?,?,?,?)""",
-                    (
-                        election_id,
-                        w["round_number"],
-                        w["cand_title"],
-                        w["total_score"],
-                        w["f1_title"],
-                        w["finalist1_runoff_votes"],
-                        w["f2_title"],
-                        w["finalist2_runoff_votes"],
-                        json.dumps(resolved),
-                    ),
-                )
-            # Snapshot individual ballot scores
-            for row in db.execute(
-                """SELECT v.first_name || ' ' || v.last_name AS voter_name,
-                          c.title AS candidate_title,
-                          vt.score
-                   FROM votes vt
-                   JOIN voters    v ON vt.voter_id     = v.id
-                   JOIN candidates c ON vt.candidate_id = c.id
-                   JOIN ballots    b ON b.voter_id = vt.voter_id
-                                   AND b.round_id = vt.round_id
-                   ORDER BY v.name_lower, c.title"""
-            ).fetchall():
-                db.execute(
-                    "INSERT INTO election_ballots (election_id, voter_name, candidate_title, score)"
-                    " VALUES (?,?,?,?)",
-                    (
-                        election_id,
-                        row["voter_name"],
-                        row["candidate_title"],
-                        row["score"],
-                    ),
-                )
+        self._archive_current_election(db)
 
         db.executescript("""
             DELETE FROM votes;
@@ -1233,6 +1348,205 @@ class VotingServer:
         await self._broadcast("state_update", self._build_state(db))
         return web.json_response({"ok": True})
 
+    # ── Company codenaming admin endpoints ──────────────────────────────────
+    # These read/write the private company name or mutate the codenaming
+    # round, so — like _admin_unsubmit above — they're gated by the admin
+    # password directly rather than the _require_mason voter-identity trick
+    # used by reveal/reset/settings.
+
+    async def _admin_codename_get(self, request: web.Request) -> web.Response:
+        db = request["db"]
+        if request.query.get("admin_password") != ADMIN_PASSWORD:
+            return web.json_response({"error": "Unauthorized"}, status=401)
+        company_name = database.get_setting(db, "codename_company_name", "")
+        history = [
+            {
+                "id": r["id"],
+                "codename": r["codename"],
+                "company_first_letter": r["company_first_letter"],
+            }
+            for r in db.execute(
+                "SELECT id, codename, company_first_letter FROM selected_codenames"
+                " ORDER BY id"
+            ).fetchall()
+        ]
+        return web.json_response(
+            {
+                "company_name": company_name,
+                "enforce_letter_check": database.get_setting(
+                    db, "codename_enforce_letter", "1"
+                )
+                == "1",
+                "required_letter": database.codename_required_letter(company_name),
+                "history": history,
+            }
+        )
+
+    async def _admin_codename_add_history(self, request: web.Request) -> web.Response:
+        db = request["db"]
+        data = await request.json()
+        if data.get("admin_password") != ADMIN_PASSWORD:
+            return web.json_response({"error": "Unauthorized"}, status=401)
+        codename = (data.get("codename") or "").strip().lower()
+        letter = (data.get("company_first_letter") or "").strip().upper()
+        if not codename:
+            return web.json_response({"error": "codename required"}, status=400)
+        if not letter or len(letter) != 1 or not letter.isalpha():
+            return web.json_response({"error": "company_first_letter required (single A-Z)"}, status=400)
+        try:
+            db.execute(
+                "INSERT INTO selected_codenames (codename, company_first_letter) VALUES (?, ?)",
+                (codename, letter),
+            )
+            db.commit()
+        except Exception:
+            return web.json_response({"error": "That codename is already in history"}, status=400)
+        return web.json_response({"ok": True})
+
+    async def _admin_codename_delete_history(self, request: web.Request) -> web.Response:
+        db = request["db"]
+        if request.query.get("admin_password") != ADMIN_PASSWORD:
+            return web.json_response({"error": "Unauthorized"}, status=401)
+        row_id = int(request.match_info["id"])
+        db.execute("DELETE FROM selected_codenames WHERE id = ?", (row_id,))
+        db.commit()
+        return web.json_response({"ok": True})
+
+    async def _admin_codename_configure(self, request: web.Request) -> web.Response:
+        db = request["db"]
+        data = await request.json()
+        if data.get("admin_password") != ADMIN_PASSWORD:
+            return web.json_response({"error": "Unauthorized"}, status=401)
+        if "company_name" in data:
+            db.execute(
+                "INSERT OR REPLACE INTO settings VALUES ('codename_company_name', ?)",
+                (str(data["company_name"]).strip(),),
+            )
+        if "enforce_letter_check" in data:
+            db.execute(
+                "INSERT OR REPLACE INTO settings VALUES ('codename_enforce_letter', ?)",
+                ("1" if data["enforce_letter_check"] else "0",),
+            )
+        db.commit()
+        await self._broadcast("state_update", self._build_state(db))
+        return web.json_response({"ok": True})
+
+    async def _admin_codename_open_submissions(
+        self, request: web.Request
+    ) -> web.Response:
+        db = request["db"]
+        data = await request.json()
+        if data.get("admin_password") != ADMIN_PASSWORD:
+            return web.json_response({"error": "Unauthorized"}, status=401)
+        if database.get_setting(db, "app_mode", "standard") != "codenaming":
+            return web.json_response(
+                {"error": "Enable Company Codenaming mode first"}, status=400
+            )
+        if not database.get_setting(db, "codename_company_name", "").strip():
+            return web.json_response(
+                {"error": "Set a company name first"}, status=400
+            )
+        if db.execute("SELECT 1 FROM candidates LIMIT 1").fetchone():
+            return web.json_response(
+                {
+                    "error": "Candidates already exist — finish the current round first"
+                },
+                status=400,
+            )
+        db.execute(
+            "INSERT OR REPLACE INTO settings VALUES ('election_state', 'CODENAME_SUBMISSION')"
+        )
+        letter = database.codename_required_letter(
+            database.get_setting(db, "codename_company_name", "")
+        )
+        if letter:
+            pool_rows = db.execute(
+                "SELECT name FROM codename_candidates WHERE letter = ?"
+                " AND name NOT IN (SELECT codename FROM selected_codenames)",
+                (letter,),
+            ).fetchall()
+            for row in pool_rows:
+                title = row["name"].capitalize()
+                db.execute(
+                    "INSERT OR IGNORE INTO candidates (title, body, author, image_path)"
+                    " VALUES (?, '', NULL, NULL)",
+                    (title,),
+                )
+        db.commit()
+        await self._broadcast("state_update", self._build_state(db))
+        return web.json_response({"ok": True})
+
+    async def _admin_codename_start_voting(self, request: web.Request) -> web.Response:
+        db = request["db"]
+        data = await request.json()
+        if data.get("admin_password") != ADMIN_PASSWORD:
+            return web.json_response({"error": "Unauthorized"}, status=401)
+        if database.get_setting(db, "election_state", "") != "CODENAME_SUBMISSION":
+            return web.json_response(
+                {"error": "Not currently in the codename submission phase"},
+                status=400,
+            )
+        if not db.execute("SELECT 1 FROM candidates LIMIT 1").fetchone():
+            return web.json_response(
+                {
+                    "error": "Need at least one codename submission before voting can start"
+                },
+                status=400,
+            )
+        db.execute("INSERT OR REPLACE INTO settings VALUES ('n_winners', '1')")
+        db.execute("INSERT OR REPLACE INTO settings VALUES ('voting_mode', 'star')")
+        db.execute(
+            "INSERT OR REPLACE INTO settings VALUES ('election_state', 'ELECTION_ACTIVE')"
+        )
+        db.commit()
+        await self._broadcast("state_update", self._build_state(db))
+        return web.json_response({"ok": True})
+
+    async def _admin_codename_finish_round(self, request: web.Request) -> web.Response:
+        db = request["db"]
+        data = await request.json()
+        if data.get("admin_password") != ADMIN_PASSWORD:
+            return web.json_response({"error": "Unauthorized"}, status=401)
+        if database.get_setting(db, "election_state", "") != "ELECTION_INACTIVE":
+            return web.json_response(
+                {"error": "Close voting before finishing the round."}, status=400
+            )
+        if not db.execute("SELECT 1 FROM winners LIMIT 1").fetchone():
+            return web.json_response(
+                {"error": "Reveal the winner before finishing the round"},
+                status=400,
+            )
+
+        letter = database.codename_required_letter(
+            database.get_setting(db, "codename_company_name", "")
+        )
+        title = f"Codenaming round (letter {letter})" if letter else "Codenaming round"
+        self._archive_current_election(db, title_override=title)
+
+        # Codename candidates are single-use per company, unlike standard
+        # elections where reset deliberately keeps candidates around — so
+        # this also wipes `candidates`, which _admin_reset never does.
+        db.executescript("""
+            DELETE FROM votes;
+            DELETE FROM ballots;
+            DELETE FROM winners;
+            DELETE FROM rounds;
+            DELETE FROM candidates;
+            INSERT INTO rounds (round_number, status) VALUES (1, 'voting');
+        """)
+        db.execute(
+            "INSERT OR REPLACE INTO settings VALUES ('codename_company_name', '')"
+        )
+        db.execute(
+            "INSERT OR REPLACE INTO settings VALUES ('codename_enforce_letter', '1')"
+        )
+        db.execute(
+            "INSERT OR REPLACE INTO settings VALUES ('election_state', 'ELECTION_INACTIVE')"
+        )
+        db.commit()
+        await self._broadcast("state_update", self._build_state(db))
+        return web.json_response({"ok": True})
+
     async def _submit_entry(self, request: web.Request) -> web.Response:
         db = request["db"]
         election_state = database.get_setting(db, "election_state", "ELECTION_ACTIVE")
@@ -1249,6 +1563,138 @@ class VotingServer:
         )
         db.commit()
         await self._broadcast("state_update", self._build_state(db))
+        return web.json_response({"ok": True})
+
+    async def _submit_codename(self, request: web.Request) -> web.Response:
+        db = request["db"]
+        if database.get_setting(db, "app_mode", "standard") != "codenaming":
+            return web.json_response({"error": "Not in codenaming mode"}, status=400)
+        if database.get_setting(db, "election_state", "") != "CODENAME_SUBMISSION":
+            return web.json_response(
+                {"error": "Codename submissions are not open"}, status=400
+            )
+        data = await request.json()
+        value = (data.get("value") or "").strip()
+        voter_name = (data.get("voter_name") or "").strip() or None
+        if not value:
+            return web.json_response({"error": "Value required"}, status=400)
+
+        company_name = database.get_setting(db, "codename_company_name", "")
+        required_letter = database.codename_required_letter(company_name)
+        enforce_letter = (
+            database.get_setting(db, "codename_enforce_letter", "1") == "1"
+        )
+        if enforce_letter and required_letter and value[0].upper() != required_letter:
+            return web.json_response(
+                {
+                    "error": f'Codenames this round must start with "{required_letter}".'
+                },
+                status=400,
+            )
+
+        if db.execute(
+            "SELECT 1 FROM candidates WHERE LOWER(title) = LOWER(?)", (value,)
+        ).fetchone():
+            return web.json_response(
+                {"error": "That name has already been suggested this round."},
+                status=400,
+            )
+        if database.is_codename_used(db, value):
+            return web.json_response(
+                {
+                    "error": "That codename has already been used for a previous company."
+                },
+                status=400,
+            )
+
+        db.execute(
+            "INSERT INTO candidates (title, body, author, image_path) VALUES (?,?,?,?)",
+            (value, "", voter_name, None),
+        )
+        if required_letter:
+            db.execute(
+                "INSERT OR IGNORE INTO codename_candidates (letter, name) VALUES (?, ?)",
+                (required_letter, value.strip().lower()),
+            )
+        db.commit()
+        await self._broadcast("state_update", self._build_state(db))
+        return web.json_response({"ok": True})
+
+    async def _delete_own_codename(self, request: web.Request) -> web.Response:
+        db = request["db"]
+        if database.get_setting(db, "election_state", "") != "CODENAME_SUBMISSION":
+            return web.json_response({"error": "Submissions are not open"}, status=400)
+        data = await request.json()
+        voter_name = (data.get("voter_name") or "").strip()
+        if not voter_name:
+            return web.json_response({"error": "voter_name required"}, status=400)
+        cid = int(request.match_info["id"])
+        row = db.execute("SELECT author FROM candidates WHERE id = ?", (cid,)).fetchone()
+        if not row:
+            return web.json_response({"error": "Not found"}, status=404)
+        if (row["author"] or "").strip().lower() != voter_name.lower():
+            return web.json_response({"error": "You can only delete your own submissions"}, status=403)
+        db.execute("DELETE FROM candidates WHERE id = ?", (cid,))
+        db.commit()
+        await self._broadcast("state_update", self._build_state(db))
+        return web.json_response({"ok": True})
+
+    # ── Codename candidate pool endpoints ──────────────────────────────────────
+
+    async def _admin_codename_pool_get(self, request: web.Request) -> web.Response:
+        db = request["db"]
+        if request.query.get("admin_password") != ADMIN_PASSWORD:
+            return web.json_response({"error": "Unauthorized"}, status=401)
+        letter = (request.query.get("letter") or "").strip().upper()
+        if not letter or len(letter) != 1 or not letter.isalpha():
+            return web.json_response({"error": "letter param required (single A-Z)"}, status=400)
+        return web.json_response({"candidates": database.codename_pool_for_letter(db, letter)})
+
+    async def _admin_codename_pool_add(self, request: web.Request) -> web.Response:
+        db = request["db"]
+        data = await request.json()
+        if data.get("admin_password") != ADMIN_PASSWORD:
+            return web.json_response({"error": "Unauthorized"}, status=401)
+        letter = (data.get("letter") or "").strip().upper()
+        name = (data.get("name") or "").strip().lower()
+        if not letter or len(letter) != 1 or not letter.isalpha():
+            return web.json_response({"error": "letter required (single A-Z)"}, status=400)
+        if not name:
+            return web.json_response({"error": "name required"}, status=400)
+        db.execute(
+            "INSERT OR IGNORE INTO codename_candidates (letter, name) VALUES (?, ?)",
+            (letter, name),
+        )
+        db.commit()
+        return web.json_response({"ok": True})
+
+    async def _admin_codename_pool_update(self, request: web.Request) -> web.Response:
+        db = request["db"]
+        data = await request.json()
+        if data.get("admin_password") != ADMIN_PASSWORD:
+            return web.json_response({"error": "Unauthorized"}, status=401)
+        row_id = int(request.match_info["id"])
+        new_name = (data.get("name") or "").strip().lower()
+        if not new_name:
+            return web.json_response({"error": "name required"}, status=400)
+        row = db.execute("SELECT letter FROM codename_candidates WHERE id = ?", (row_id,)).fetchone()
+        if not row:
+            return web.json_response({"error": "Not found"}, status=404)
+        if new_name[0].upper() != row["letter"]:
+            return web.json_response(
+                {"error": f'Name must start with "{row["letter"]}"'}, status=400
+            )
+        db.execute("UPDATE codename_candidates SET name = ? WHERE id = ?", (new_name, row_id))
+        db.commit()
+        return web.json_response({"ok": True})
+
+    async def _admin_codename_pool_delete(self, request: web.Request) -> web.Response:
+        db = request["db"]
+        if request.query.get("admin_password") != ADMIN_PASSWORD:
+            return web.json_response({"error": "Unauthorized"}, status=401)
+        row_id = int(request.match_info["id"])
+        db.execute("DELETE FROM codename_candidates WHERE id = ?", (row_id,))
+        db.commit()
         return web.json_response({"ok": True})
 
     async def _admin_import_voters(self, request: web.Request) -> web.Response:

@@ -30,7 +30,10 @@ def init_db(path: Path) -> None:
                 ('election_title',  ''),
                 ('election_state',  'ELECTION_ACTIVE'),
                 ('entry_context',   ''),
-                ('show_author',     '1');
+                ('show_author',     '1'),
+                ('app_mode',                  'standard'),
+                ('codename_company_name',     ''),
+                ('codename_enforce_letter',   '1');
 
             CREATE TABLE IF NOT EXISTS candidates (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -132,6 +135,28 @@ def init_db(path: Path) -> None:
                 sort_order INTEGER NOT NULL DEFAULT 0
             );
 
+            -- Company codenaming mode: tree-name codenames already used for a
+            -- past company, keyed only by the company's first letter. The
+            -- real company name is never stored here (or anywhere else
+            -- persistent) — see settings.codename_company_name, which is
+            -- transient and cleared once a codenaming round finishes.
+            CREATE TABLE IF NOT EXISTS selected_codenames (
+                id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+                codename              TEXT NOT NULL UNIQUE,
+                company_first_letter  TEXT NOT NULL
+            );
+
+            -- Persistent pool of submitted codename candidates, keyed by
+            -- first letter. Every accepted submission is saved here so past
+            -- suggestions are auto-loaded into the candidate list when a new
+            -- round opens for the same letter. Names stored lowercase.
+            CREATE TABLE IF NOT EXISTS codename_candidates (
+                id     INTEGER PRIMARY KEY AUTOINCREMENT,
+                letter TEXT NOT NULL,
+                name   TEXT NOT NULL,
+                UNIQUE(letter, name)
+            );
+
         """
         )
         if not db.execute("SELECT 1 FROM rounds").fetchone():
@@ -172,3 +197,44 @@ def voter_has_voted(db: sqlite3.Connection, voter_id: int, round_id: int) -> boo
             (voter_id, round_id),
         ).fetchone()
     )
+
+
+# ── Company codenaming helpers ──────────────────────────────────────────────
+
+
+def codename_required_letter(company_name: str) -> Optional[str]:
+    """First uppercase letter of the (private) company name, or None if it
+    doesn't start with a letter (e.g. starts with a digit/symbol) — callers
+    should treat None as "letter enforcement can't apply right now"."""
+    name = (company_name or "").strip()
+    return name[0].upper() if name and name[0].isalpha() else None
+
+
+def is_codename_used(db: sqlite3.Connection, codename: str) -> bool:
+    return bool(
+        db.execute(
+            "SELECT 1 FROM selected_codenames WHERE codename = ?",
+            (codename.strip().lower(),),
+        ).fetchone()
+    )
+
+
+def codename_pool_for_letter(db: sqlite3.Connection, letter: str) -> list[dict]:
+    """Pool candidates for a letter, alphabetically. name is lowercase."""
+    rows = db.execute(
+        "SELECT id, name FROM codename_candidates WHERE letter = ? ORDER BY name",
+        (letter,),
+    ).fetchall()
+    return [{"id": r["id"], "name": r["name"]} for r in rows]
+
+
+def codenames_for_letter(db: sqlite3.Connection, letter: str) -> list[str]:
+    """Lowercase codenames already used for a given letter, oldest first.
+    Stored form is always lowercase (the table's UNIQUE constraint is on
+    that canonical form) — title-case at render time if desired."""
+    rows = db.execute(
+        "SELECT codename FROM selected_codenames"
+        " WHERE company_first_letter = ? ORDER BY id",
+        (letter,),
+    ).fetchall()
+    return [r["codename"] for r in rows]

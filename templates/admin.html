@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>STAR Voting — Admin</title>
+<title>STAR Voting Admin</title>
 <style>
 :root {
   --bg:       #0f172a;
@@ -256,14 +256,14 @@ input[type="file"]::file-selector-button {
     <h2>&#9670; Admin Access</h2>
     <p>Enter the admin password to continue.</p>
     <input type="password" id="pw-input" placeholder="Password" autocomplete="current-password">
-    <div id="pw-error">Wrong password — try again.</div>
+    <div id="pw-error">Wrong password. Try again.</div>
     <button class="btn" id="pw-submit-btn" style="width:100%">Unlock</button>
   </div>
 </div>
 
 <header>
   <h1 id="admin-page-title">&#9670; STAR Voting Admin</h1>
-  <a href="/">&#8592; Voter Page</a>
+  <a href="./">&#8592; Voter Page</a>
 </header>
 
 <main>
@@ -275,6 +275,67 @@ input[type="file"]::file-selector-button {
       <button class="btn" id="reveal-btn">Reveal Winner</button>
       <button class="btn btn-danger" id="reset-btn">Reset Election</button>
       <span class="msg" id="controls-msg"></span>
+    </div>
+  </div>
+
+  <!-- Company Codenaming -->
+  <div class="card">
+    <h2>Company Codenaming</h2>
+    <div class="settings-row" style="margin-bottom:.9rem">
+      <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;font-weight:400">
+        <input type="checkbox" id="app-mode-toggle" style="width:1.1rem;height:1.1rem;cursor:pointer;accent-color:var(--primary)">
+        Enable Company Codenaming Mode
+      </label>
+    </div>
+    <div id="codename-body" style="display:none">
+      <div class="settings-row" style="margin-bottom:.9rem">
+        <label for="codename-company-input" style="white-space:nowrap">Company Name (private):</label>
+        <input type="text" id="codename-company-input" placeholder="Never shown to voters" style="flex:1;min-width:180px">
+        <span id="codename-letter-preview" style="font-size:.82rem;color:var(--muted);white-space:nowrap"></span>
+      </div>
+      <div class="settings-row" style="margin-bottom:.9rem">
+        <label for="codename-enforce-toggle" style="cursor:pointer">Require first-letter match:</label>
+        <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;font-weight:400">
+          <input type="checkbox" id="codename-enforce-toggle" checked style="width:1.1rem;height:1.1rem;cursor:pointer;accent-color:var(--success)">
+          <span style="font-size:.88rem;color:var(--muted)">Submitted tree names must start with the company's first letter</span>
+        </label>
+      </div>
+      <div style="display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;margin-bottom:1rem">
+        <button class="btn" id="codename-save-btn">Save</button>
+        <button class="btn btn-ghost" id="codename-open-btn">Open Submissions</button>
+        <button class="btn btn-ghost" id="codename-start-voting-btn">Start Voting</button>
+        <button class="btn btn-danger" id="codename-finish-btn">Finish Round</button>
+        <span class="msg" id="codename-msg"></span>
+      </div>
+      <div class="note" style="margin-top:0;margin-bottom:1rem">
+        Flow: enter the company name &amp; save → Open Submissions (voters suggest tree-name
+        codenames on the main page) → review/delete bad ones in the Candidates card below →
+        Start Voting (hardcoded single-round STAR vote) → Reveal Winner (Election Controls
+        card above) → Finish Round (archives the round to Election History and clears the
+        board for the next company).
+      </div>
+      <h3 style="font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:.6rem">Codename History</h3>
+      <div style="display:flex;gap:.5rem;margin-bottom:.6rem">
+        <input type="text" id="history-add-codename" placeholder="Codename" style="flex:2">
+        <input type="text" id="history-add-letter" placeholder="Letter" maxlength="1" style="width:4rem;text-transform:uppercase">
+        <button class="btn btn-sm" onclick="addCodenameHistory()">Add</button>
+        <span class="msg" id="history-add-msg"></span>
+      </div>
+      <div id="codename-history-list"><span style="color:var(--muted);font-size:.9rem">Loading…</span></div>
+
+      <h3 style="font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:.9rem 0 .6rem">Candidate Pool</h3>
+      <div style="display:flex;gap:.5rem;align-items:center;margin-bottom:.6rem;flex-wrap:wrap">
+        <select id="pool-letter-select" style="width:4rem">
+          <option value=""></option>
+        </select>
+        <button class="btn btn-ghost btn-sm" onclick="loadPool()">Load</button>
+        <span class="msg" id="pool-msg"></span>
+      </div>
+      <div style="display:flex;gap:.5rem;margin-bottom:.6rem">
+        <input type="text" id="pool-add-input" placeholder="Add a name to the pool…" style="flex:1">
+        <button class="btn btn-sm" onclick="addPoolCandidate()">Add</button>
+      </div>
+      <div id="pool-list" style="font-size:.88rem"></div>
     </div>
   </div>
 
@@ -305,7 +366,8 @@ input[type="file"]::file-selector-button {
       <select id="election-state-select" style="flex:1;max-width:340px">
         <option value="ELECTION_ACTIVE">Voting is open (ELECTION_ACTIVE)</option>
         <option value="ELECTION_INACTIVE">Voting is closed (ELECTION_INACTIVE)</option>
-        <option value="CANDIDATE_ENTRY_NAMES">Candidate entry — Names (CANDIDATE_ENTRY_NAMES)</option>
+        <option value="CANDIDATE_ENTRY_NAMES">Candidate entry: Names (CANDIDATE_ENTRY_NAMES)</option>
+        <option value="CODENAME_SUBMISSION">Codename submission (CODENAME_SUBMISSION)</option>
       </select>
     </div>
     <div class="settings-row" style="margin-bottom:.9rem;align-items:flex-start">
@@ -366,7 +428,7 @@ input[type="file"]::file-selector-button {
       <span id="candidate-count" style="font-size:.82rem;color:var(--muted)"></span>
       <div style="display:flex;gap:.5rem;align-items:center">
         <button class="btn btn-ghost btn-sm" id="gen-test-btn" title="Only works when no candidates exist">&#9685; Generate Test Ballot (10)</button>
-        <button class="btn btn-danger btn-sm" id="clear-cands-btn" title="Requires no active votes — reset election first if needed">Clear All</button>
+        <button class="btn btn-danger btn-sm" id="clear-cands-btn" title="Requires no active votes. Reset election first if needed.">Clear All</button>
         <span class="msg" id="gen-test-msg"></span>
       </div>
     </div>
@@ -404,7 +466,7 @@ input[type="file"]::file-selector-button {
     <div style="display:flex;gap:.75rem;align-items:flex-end;flex-wrap:wrap">
       <div class="form-group" style="flex:1;min-width:180px">
         <label for="unsubmit-select">Voter (submitted this round)</label>
-        <select id="unsubmit-select"><option value="">— select a voter —</option></select>
+        <select id="unsubmit-select"><option value="">Select a voter</option></select>
       </div>
       <button class="btn btn-danger" id="unsubmit-btn" disabled>Unsubmit</button>
     </div>
@@ -532,9 +594,23 @@ async function loadSettings() {
     document.getElementById('show-author-toggle').checked = showAuthor;
     document.getElementById('show-author-label').textContent = showAuthor ? 'Author shown on ballot' : 'Author hidden on ballot';
     const isScore = mode === 'score';
-    const label = isScore ? 'Multi-Winner Score Voting Admin' : 'STAR Voting Admin';
+    const appMode = s.app_mode || 'standard';
+    const label = appMode === 'codenaming'
+      ? 'Company Codenaming Admin'
+      : (isScore ? 'Multi-Winner Score Voting Admin' : 'STAR Voting Admin');
     document.getElementById('admin-page-title').textContent = `\u25C6 ${label}`;
     document.title = label;
+
+    document.getElementById('app-mode-toggle').checked = appMode === 'codenaming';
+    document.getElementById('codename-body').style.display = appMode === 'codenaming' ? '' : 'none';
+    if (appMode === 'codenaming') loadCodenameAdmin();
+
+    const votingClosed = s.election_state === 'ELECTION_INACTIVE';
+    const tip = votingClosed ? '' : 'Set Election State to "Voting is closed" first';
+    document.getElementById('reveal-btn').disabled = !votingClosed;
+    document.getElementById('reveal-btn').title = tip;
+    document.getElementById('codename-finish-btn').disabled = !votingClosed;
+    document.getElementById('codename-finish-btn').title = tip;
   } catch(e) {}
 }
 
@@ -556,6 +632,234 @@ document.getElementById('save-settings-btn').addEventListener('click', async () 
     });
     const d = await r.json();
     showMsg(msg, r.ok ? 'Saved!' : (d.error || 'Error'), r.ok);
+    if (r.ok) loadSettings();
+  } catch(e) { showMsg(msg, 'Network error', false); }
+});
+
+// ── Company codenaming ──────────────────────────────────────────────────────
+document.getElementById('app-mode-toggle').addEventListener('change', async (e) => {
+  const codenaming = e.target.checked;
+  document.getElementById('codename-body').style.display = codenaming ? '' : 'none';
+  try {
+    await fetch('/api/admin/settings', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({voter_name: 'Mason Hieb', app_mode: codenaming ? 'codenaming' : 'standard'})
+    });
+    if (codenaming) loadCodenameAdmin();
+  } catch(e) {}
+});
+
+function updateLetterPreview() {
+  const name = document.getElementById('codename-company-input').value.trim();
+  const letter = (name && /[a-zA-Z]/.test(name[0])) ? name[0].toUpperCase() : null;
+  document.getElementById('codename-letter-preview').textContent = letter ? `Required letter: ${letter}` : '';
+}
+document.getElementById('codename-company-input').addEventListener('input', updateLetterPreview);
+
+async function loadCodenameAdmin() {
+  try {
+    const r = await fetch('/api/admin/codename?admin_password=' + encodeURIComponent(adminPassword || ''));
+    const d = await r.json();
+    if (!r.ok) return;
+    document.getElementById('codename-company-input').value = d.company_name || '';
+    document.getElementById('codename-enforce-toggle').checked = d.enforce_letter_check !== false;
+    updateLetterPreview();
+    renderCodenameHistory(d.history || []);
+    if (d.required_letter) {
+      document.getElementById('pool-letter-select').value = d.required_letter;
+      loadPool();
+    }
+  } catch(e) {}
+}
+
+function renderCodenameHistory(history) {
+  const el = document.getElementById('codename-history-list');
+  if (!history.length) {
+    el.innerHTML = '<span style="color:var(--muted);font-size:.9rem">No codenames used yet.</span>';
+    return;
+  }
+  el.innerHTML = history.map(h => {
+    const nice = h.codename.charAt(0).toUpperCase() + h.codename.slice(1);
+    return `<div style="display:flex;align-items:center;gap:.6rem;padding:.3rem 0;border-bottom:1px solid var(--border);font-size:.88rem">
+      <span style="font-weight:700;min-width:1.4rem">${esc(h.company_first_letter)}</span>
+      <span style="flex:1">${esc(nice)}</span>
+      <button class="btn btn-danger btn-sm" onclick="deleteCodename(${h.id}, '${esc(nice)}', this)">Delete</button>
+    </div>`;
+  }).join('');
+}
+
+async function deleteCodename(id, name, btn) {
+  if (!confirm(`Remove "${name}" from the codename history? It will become available to use again.`)) return;
+  btn.disabled = true;
+  try {
+    const r = await fetch(`/api/admin/codename/history/${id}?admin_password=` + encodeURIComponent(adminPassword || ''), {method: 'DELETE'});
+    if (r.ok) { loadCodenameAdmin(); }
+    else { const d = await r.json(); alert(d.error || 'Error'); btn.disabled = false; }
+  } catch(e) { alert('Network error'); btn.disabled = false; }
+}
+
+async function addCodenameHistory() {
+  const codename = document.getElementById('history-add-codename').value.trim();
+  const letter = document.getElementById('history-add-letter').value.trim().toUpperCase();
+  const msg = document.getElementById('history-add-msg');
+  if (!codename || !letter) { showMsg(msg, 'Both fields required', false); return; }
+  try {
+    const r = await fetch('/api/admin/codename/history', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({admin_password: adminPassword, codename, company_first_letter: letter})
+    });
+    const d = await r.json();
+    if (r.ok) {
+      document.getElementById('history-add-codename').value = '';
+      document.getElementById('history-add-letter').value = '';
+      showMsg(msg, 'Added', true);
+      loadCodenameAdmin();
+    } else { showMsg(msg, d.error || 'Error', false); }
+  } catch(e) { showMsg(msg, 'Network error', false); }
+}
+
+// ── Candidate pool ──────────────────────────────────────────────────────────
+(function initPoolLetterSelect() {
+  const sel = document.getElementById('pool-letter-select');
+  for (let i = 0; i < 26; i++) {
+    const l = String.fromCharCode(65 + i);
+    const opt = document.createElement('option');
+    opt.value = l; opt.textContent = l;
+    sel.appendChild(opt);
+  }
+})();
+
+async function loadPool() {
+  const letter = document.getElementById('pool-letter-select').value;
+  const el = document.getElementById('pool-list');
+  const msg = document.getElementById('pool-msg');
+  if (!letter) { el.innerHTML = ''; return; }
+  el.innerHTML = '<span style="color:var(--muted)">Loading…</span>';
+  try {
+    const r = await fetch(`/api/admin/codename/pool?letter=${letter}&admin_password=` + encodeURIComponent(adminPassword || ''));
+    const d = await r.json();
+    if (!r.ok) { el.innerHTML = `<span style="color:var(--danger)">${esc(d.error || 'Error')}</span>`; return; }
+    renderPool(d.candidates || [], letter);
+  } catch(e) { el.innerHTML = '<span style="color:var(--danger)">Network error</span>'; }
+}
+
+function renderPool(candidates, letter) {
+  const el = document.getElementById('pool-list');
+  if (!candidates.length) {
+    el.innerHTML = `<span style="color:var(--muted)">No candidates for ${esc(letter)} yet.</span>`;
+    return;
+  }
+  el.innerHTML = candidates.map(c => {
+    const nice = c.name.charAt(0).toUpperCase() + c.name.slice(1);
+    return `<div style="display:flex;align-items:center;gap:.5rem;padding:.25rem 0;border-bottom:1px solid var(--border)">
+      <span style="flex:1">${esc(nice)}</span>
+      <button class="btn btn-ghost btn-sm" onclick="editPoolCandidate(${c.id},'${esc(c.name)}',this)">Edit</button>
+      <button class="btn btn-danger btn-sm" onclick="deletePoolCandidate(${c.id},'${esc(nice)}',this)">Delete</button>
+    </div>`;
+  }).join('');
+}
+
+async function addPoolCandidate() {
+  const letter = document.getElementById('pool-letter-select').value;
+  const name = document.getElementById('pool-add-input').value.trim();
+  const msg = document.getElementById('pool-msg');
+  if (!letter) { showMsg(msg, 'Select a letter first', false); return; }
+  if (!name) { showMsg(msg, 'Enter a name', false); return; }
+  try {
+    const r = await fetch('/api/admin/codename/pool', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({admin_password: adminPassword, letter, name})
+    });
+    const d = await r.json();
+    if (r.ok) { document.getElementById('pool-add-input').value = ''; showMsg(msg, 'Added', true); loadPool(); }
+    else { showMsg(msg, d.error || 'Error', false); }
+  } catch(e) { showMsg(msg, 'Network error', false); }
+}
+
+async function editPoolCandidate(id, currentName, btn) {
+  const newName = prompt('Rename codename:', currentName.charAt(0).toUpperCase() + currentName.slice(1));
+  if (!newName || newName.trim().toLowerCase() === currentName.toLowerCase()) return;
+  btn.disabled = true;
+  try {
+    const r = await fetch(`/api/admin/codename/pool/${id}`, {
+      method: 'PUT',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({admin_password: adminPassword, name: newName.trim()})
+    });
+    const d = await r.json();
+    if (r.ok) { loadPool(); }
+    else { alert(d.error || 'Error'); btn.disabled = false; }
+  } catch(e) { alert('Network error'); btn.disabled = false; }
+}
+
+async function deletePoolCandidate(id, name, btn) {
+  if (!confirm(`Remove "${name}" from the pool? It won't be auto-suggested in future rounds.`)) return;
+  btn.disabled = true;
+  try {
+    const r = await fetch(`/api/admin/codename/pool/${id}?admin_password=` + encodeURIComponent(adminPassword || ''), {method: 'DELETE'});
+    if (r.ok) { loadPool(); }
+    else { const d = await r.json(); alert(d.error || 'Error'); btn.disabled = false; }
+  } catch(e) { alert('Network error'); btn.disabled = false; }
+}
+
+document.getElementById('codename-save-btn').addEventListener('click', async () => {
+  const msg = document.getElementById('codename-msg');
+  const company_name = document.getElementById('codename-company-input').value.trim();
+  const enforce_letter_check = document.getElementById('codename-enforce-toggle').checked;
+  try {
+    const r = await fetch('/api/admin/codename/configure', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({admin_password: adminPassword, company_name, enforce_letter_check})
+    });
+    const d = await r.json();
+    showMsg(msg, r.ok ? 'Saved!' : (d.error || 'Error'), r.ok);
+    if (r.ok) loadCodenameAdmin();
+  } catch(e) { showMsg(msg, 'Network error', false); }
+});
+
+document.getElementById('codename-open-btn').addEventListener('click', async () => {
+  const msg = document.getElementById('codename-msg');
+  try {
+    const r = await fetch('/api/admin/codename/open-submissions', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({admin_password: adminPassword})
+    });
+    const d = await r.json();
+    showMsg(msg, r.ok ? 'Submissions open!' : (d.error || 'Error'), r.ok);
+    if (r.ok) loadCandidates();
+  } catch(e) { showMsg(msg, 'Network error', false); }
+});
+
+document.getElementById('codename-start-voting-btn').addEventListener('click', async () => {
+  const msg = document.getElementById('codename-msg');
+  try {
+    const r = await fetch('/api/admin/codename/start-voting', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({admin_password: adminPassword})
+    });
+    const d = await r.json();
+    showMsg(msg, r.ok ? 'Voting started!' : (d.error || 'Error'), r.ok);
+  } catch(e) { showMsg(msg, 'Network error', false); }
+});
+
+document.getElementById('codename-finish-btn').addEventListener('click', async () => {
+  if (!confirm('Finish this codenaming round? This archives the result to Election History and clears all candidates/votes so the board is ready for the next company.')) return;
+  const msg = document.getElementById('codename-msg');
+  try {
+    const r = await fetch('/api/admin/codename/finish-round', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({admin_password: adminPassword})
+    });
+    const d = await r.json();
+    showMsg(msg, r.ok ? 'Round finished!' : (d.error || 'Error'), r.ok);
+    if (r.ok) { loadCodenameAdmin(); loadCandidates(); loadHistory(); }
   } catch(e) { showMsg(msg, 'Network error', false); }
 });
 
@@ -739,7 +1043,7 @@ async function loadHistory() {
           const tds = candidates.map(t => {
             const s = scoreMap[t];
             const style = s === undefined ? 'color:var(--muted)' : s === 0 ? 'color:var(--danger)' : s >= 4 ? 'color:var(--success)' : '';
-            return `<td style="padding:.3rem .5rem;text-align:center;font-size:.85rem;${style}">${s !== undefined ? s : '—'}</td>`;
+            return `<td style="padding:.3rem .5rem;text-align:center;font-size:.85rem;${style}">${s !== undefined ? s : '-'}</td>`;
           }).join('');
           return `<tr>
             <td style="padding:.3rem .6rem .3rem 0;font-size:.85rem;white-space:nowrap;border-right:1px solid var(--border)">${esc(voter)}</td>
@@ -819,7 +1123,7 @@ async function loadSets() {
             const img = item.image_url
               ? `<img src="${esc(item.image_url)}" style="width:40px;height:30px;object-fit:cover;border-radius:4px;border:1px solid var(--border);flex-shrink:0">`
               : '';
-            const author = item.author ? `<span style="font-size:.75rem;color:var(--muted)"> — ${esc(item.author)}</span>` : '';
+            const author = item.author ? `<span style="font-size:.75rem;color:var(--muted)">: ${esc(item.author)}</span>` : '';
             const isFirst = idx === 0, isLast = idx === s.items.length - 1;
             return `<div style="display:flex;align-items:center;gap:.6rem;padding:.3rem 0;border-bottom:1px solid var(--border)">
               ${img}
@@ -1135,7 +1439,7 @@ async function loadVotersForUnsubmit() {
     const r = await fetch('/api/voters');
     const voters = await r.json();
     const submitted = voters.filter(v => v.voted);
-    sel.innerHTML = '<option value="">— select a voter —</option>' +
+    sel.innerHTML = '<option value="">Select a voter</option>' +
       submitted.map(v => `<option value="${v.id}">${esc(v.name)}</option>`).join('');
     document.getElementById('unsubmit-btn').disabled = submitted.length === 0;
   } catch(e) {}
