@@ -861,7 +861,7 @@ function renderEntrySection() {
 
 function renderMyEntries() {
   const el = document.getElementById('my-entries-list');
-  if (!myEntries.length) { el.innerHTML = ''; return; }
+  if (isCodenameSubmission() || !myEntries.length) { el.innerHTML = ''; return; }
   el.innerHTML =
     `<div style="font-size:.8rem;color:var(--muted);margin-bottom:.3rem">Your submissions this session:</div>` +
     myEntries.map(v => `<div class="entry-item">${esc(v)}</div>`).join('');
