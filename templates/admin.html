@@ -303,6 +303,7 @@ input[type="file"]::file-selector-button {
       <div style="display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;margin-bottom:1rem">
         <button class="btn" id="codename-save-btn">Save</button>
         <button class="btn btn-ghost" id="codename-open-btn">Open Submissions</button>
+        <button class="btn btn-ghost" id="codename-sync-pool-btn">Sync Pool</button>
         <button class="btn btn-ghost" id="codename-start-voting-btn">Start Voting</button>
         <button class="btn btn-danger" id="codename-finish-btn">Finish Round</button>
         <span class="msg" id="codename-msg"></span>
@@ -490,6 +491,12 @@ input[type="file"]::file-selector-button {
     <div id="history-list"><span style="color:var(--muted);font-size:.9rem">Loading…</span></div>
   </div>
 
+  <!-- Current election results -->
+  <div class="card">
+    <h2>Current Election Results</h2>
+    <div id="current-results-body"><span style="color:var(--muted);font-size:.9rem">No results yet.</span></div>
+  </div>
+
 </main>
 
 <script>
@@ -540,6 +547,7 @@ function initAdmin() {
   loadCandidates();
   loadSets();
   loadHistory();
+  loadCurrentResults();
   loadVotersForUnsubmit();
   initControls();
 }
@@ -558,7 +566,7 @@ function initControls() {
       });
       const d = await r.json();
       if (!r.ok) { showMsg(msg, d.error || 'Error', false); }
-      else { showMsg(msg, 'Winner revealed!', true); loadHistory(); }
+      else { showMsg(msg, 'Winner revealed!', true); loadHistory(); loadCurrentResults(); }
     } catch(e) { showMsg(msg, 'Network error', false); }
     btn.disabled = false;
   });
@@ -574,7 +582,7 @@ function initControls() {
       });
       const d = await r.json();
       if (!r.ok) { showMsg(msg, d.error || 'Error', false); }
-      else { showMsg(msg, 'Election reset.', true); loadHistory(); loadVotersForUnsubmit(); }
+      else { showMsg(msg, 'Election reset.', true); loadHistory(); loadCurrentResults(); loadVotersForUnsubmit(); }
     } catch(e) { showMsg(msg, 'Network error', false); }
   });
 }
@@ -831,6 +839,20 @@ document.getElementById('codename-open-btn').addEventListener('click', async () 
     });
     const d = await r.json();
     showMsg(msg, r.ok ? 'Submissions open!' : (d.error || 'Error'), r.ok);
+    if (r.ok) loadCandidates();
+  } catch(e) { showMsg(msg, 'Network error', false); }
+});
+
+document.getElementById('codename-sync-pool-btn').addEventListener('click', async () => {
+  const msg = document.getElementById('codename-msg');
+  try {
+    const r = await fetch('/api/admin/codename/sync-pool', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({admin_password: adminPassword})
+    });
+    const d = await r.json();
+    showMsg(msg, r.ok ? 'Pool synced to candidates.' : (d.error || 'Error'), r.ok);
     if (r.ok) loadCandidates();
   } catch(e) { showMsg(msg, 'Network error', false); }
 });
@@ -1102,6 +1124,30 @@ async function deleteElection(id, btn) {
     if (!r.ok) { btn.disabled = false; alert((await r.json()).error || 'Error'); return; }
     loadHistory();
   } catch(e) { btn.disabled = false; alert('Network error'); }
+}
+
+async function loadCurrentResults() {
+  const el = document.getElementById('current-results-body');
+  try {
+    const r = await fetch('/api/admin/current-results');
+    const data = await r.json();
+    if (!data.results.length) {
+      el.innerHTML = '<span style="color:var(--muted);font-size:.9rem">No results yet. Reveal a winner to see the full ranking.</span>';
+      return;
+    }
+    el.innerHTML = data.results.map(item => {
+      const medal = item.is_winner ? (item.rank === 1 ? '&#127941;' : '&#11088;') : '';
+      const bold = item.is_winner ? 'font-weight:600' : '';
+      return `<div style="display:flex;align-items:baseline;gap:.6rem;padding:.35rem 0;border-bottom:1px solid var(--border)">
+        <span style="color:var(--muted);font-size:.85rem;min-width:2rem;text-align:right">#${item.rank}</span>
+        <span style="font-size:1rem;min-width:1.4rem;text-align:center">${medal}</span>
+        <span style="flex:1;${bold}">${esc(item.title)}</span>
+        <span style="color:var(--muted);font-size:.85rem">Score: ${item.score}</span>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    el.innerHTML = '<span style="color:var(--danger);font-size:.9rem">Failed to load results.</span>';
+  }
 }
 
 // ── Candidate sets ──────────────────────────────────────────────────────────

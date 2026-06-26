@@ -218,7 +218,20 @@ class VotingServer:
         round_number = round_row["round_number"]
         round_status = round_row["status"]
 
-        eligible = database.eligible_candidates(db)
+        # During submission/entry phases every candidate in the table must be
+        # visible — hiding winners-filtered entries makes no sense when no
+        # voting has happened yet. eligible_candidates() (which filters out
+        # past winners) is only correct for the active ballot itself.
+        is_submission = (
+            election_state == "CODENAME_SUBMISSION"
+            or election_state.startswith("CANDIDATE_ENTRY_")
+        )
+        if is_submission:
+            source_candidates = db.execute(
+                "SELECT * FROM candidates ORDER BY id"
+            ).fetchall()
+        else:
+            source_candidates = database.eligible_candidates(db)
         candidates_data = [
             {
                 "id": c["id"],
@@ -227,7 +240,7 @@ class VotingServer:
                 "author": c["author"],
                 "image_url": f"images/{c['image_path']}" if c["image_path"] else None,
             }
-            for c in eligible
+            for c in source_candidates
         ]
 
         winners_data = []
@@ -419,6 +432,7 @@ class VotingServer:
         r.add_post("/api/admin/reveal", self._admin_reveal_winner)
         r.add_post("/api/admin/reset", self._admin_reset)
         r.add_get("/api/admin/elections", self._admin_get_elections)
+        r.add_get("/api/admin/current-results", self._admin_current_results)
         r.add_delete("/api/admin/elections/{id}", self._admin_delete_election)
         r.add_post("/api/admin/unsubmit", self._admin_unsubmit)
         r.add_post("/api/entry", self._submit_entry)
@@ -434,6 +448,7 @@ class VotingServer:
             "/api/admin/codename/history/{id}",
             self._admin_codename_delete_history,
         )
+        r.add_post("/api/admin/codename/sync-pool", self._admin_codename_sync_pool)
         r.add_get("/api/admin/codename/pool", self._admin_codename_pool_get)
         r.add_post("/api/admin/codename/pool", self._admin_codename_pool_add)
         r.add_put("/api/admin/codename/pool/{id}", self._admin_codename_pool_update)
@@ -1073,6 +1088,39 @@ class VotingServer:
             )
         return web.json_response(elections)
 
+    async def _admin_current_results(self, request: web.Request) -> web.Response:
+        """Full candidate ranking for the current (live) election, using the
+        first revealed round's all_scores so every original candidate appears."""
+        db = request["db"]
+        first_winner = db.execute(
+            "SELECT all_scores FROM winners ORDER BY round_number ASC LIMIT 1"
+        ).fetchone()
+        if not first_winner or not first_winner["all_scores"]:
+            return web.json_response({"results": []})
+
+        raw = json.loads(first_winner["all_scores"])
+        winner_ids = {
+            row["candidate_id"]
+            for row in db.execute("SELECT candidate_id FROM winners").fetchall()
+        }
+        results = []
+        for rank, (cid_str, score) in enumerate(
+            sorted(raw.items(), key=lambda x: -x[1]), start=1
+        ):
+            cid = int(cid_str)
+            cand = db.execute(
+                "SELECT title FROM candidates WHERE id = ?", (cid,)
+            ).fetchone()
+            results.append(
+                {
+                    "rank": rank,
+                    "title": cand["title"] if cand else f"#{cid}",
+                    "score": score,
+                    "is_winner": cid in winner_ids,
+                }
+            )
+        return web.json_response({"results": results})
+
     async def _admin_delete_election(self, request: web.Request) -> web.Response:
         db = request["db"]
         election_id = int(request.match_info["id"])
@@ -1367,7 +1415,7 @@ class VotingServer:
             }
             for r in db.execute(
                 "SELECT id, codename, company_first_letter FROM selected_codenames"
-                " ORDER BY id"
+                " ORDER BY company_first_letter, codename"
             ).fetchall()
         ]
         return web.json_response(
@@ -1493,6 +1541,11 @@ class VotingServer:
                 },
                 status=400,
             )
+        letter = database.codename_required_letter(
+            database.get_setting(db, "codename_company_name", "")
+        )
+        if letter:
+            self._sync_pool_to_candidates(db, letter)
         db.execute("INSERT OR REPLACE INTO settings VALUES ('n_winners', '1')")
         db.execute("INSERT OR REPLACE INTO settings VALUES ('voting_mode', 'star')")
         db.execute(
@@ -1639,7 +1692,47 @@ class VotingServer:
         await self._broadcast("state_update", self._build_state(db))
         return web.json_response({"ok": True})
 
+    def _sync_pool_to_candidates(self, db: sqlite3.Connection, letter: str) -> None:
+        """Add pool entries for letter (not selected, not already in candidates) to candidates."""
+        pool_rows = db.execute(
+            "SELECT name FROM codename_candidates WHERE letter = ?"
+            " AND name NOT IN (SELECT codename FROM selected_codenames)",
+            (letter,),
+        ).fetchall()
+        for row in pool_rows:
+            if not db.execute(
+                "SELECT 1 FROM candidates WHERE LOWER(title) = ?", (row["name"],)
+            ).fetchone():
+                db.execute(
+                    "INSERT INTO candidates (title, body, author, image_path)"
+                    " VALUES (?, '', NULL, NULL)",
+                    (row["name"].capitalize(),),
+                )
+
+    def _active_codename_letter(self, db: sqlite3.Connection) -> Optional[str]:
+        """Return the required letter if currently in CODENAME_SUBMISSION, else None."""
+        if database.get_setting(db, "election_state", "") != "CODENAME_SUBMISSION":
+            return None
+        return database.codename_required_letter(
+            database.get_setting(db, "codename_company_name", "")
+        )
+
     # ── Codename candidate pool endpoints ──────────────────────────────────────
+
+    async def _admin_codename_sync_pool(self, request: web.Request) -> web.Response:
+        db = request["db"]
+        data = await request.json()
+        if data.get("admin_password") != ADMIN_PASSWORD:
+            return web.json_response({"error": "Unauthorized"}, status=401)
+        letter = self._active_codename_letter(db)
+        if not letter:
+            return web.json_response(
+                {"error": "Only available during codename submission phase"}, status=400
+            )
+        self._sync_pool_to_candidates(db, letter)
+        db.commit()
+        await self._broadcast("state_update", self._build_state(db))
+        return web.json_response({"ok": True})
 
     async def _admin_codename_pool_get(self, request: web.Request) -> web.Response:
         db = request["db"]
@@ -1665,7 +1758,12 @@ class VotingServer:
             "INSERT OR IGNORE INTO codename_candidates (letter, name) VALUES (?, ?)",
             (letter, name),
         )
+        active_letter = self._active_codename_letter(db)
+        if active_letter and active_letter == letter:
+            self._sync_pool_to_candidates(db, letter)
         db.commit()
+        if active_letter and active_letter == letter:
+            await self._broadcast("state_update", self._build_state(db))
         return web.json_response({"ok": True})
 
     async def _admin_codename_pool_update(self, request: web.Request) -> web.Response:
@@ -1684,8 +1782,19 @@ class VotingServer:
             return web.json_response(
                 {"error": f'Name must start with "{row["letter"]}"'}, status=400
             )
+        old_name = db.execute(
+            "SELECT name FROM codename_candidates WHERE id = ?", (row_id,)
+        ).fetchone()["name"]
         db.execute("UPDATE codename_candidates SET name = ? WHERE id = ?", (new_name, row_id))
+        active_letter = self._active_codename_letter(db)
+        if active_letter and active_letter == row["letter"]:
+            db.execute(
+                "UPDATE candidates SET title = ? WHERE LOWER(title) = ?",
+                (new_name.capitalize(), old_name),
+            )
         db.commit()
+        if active_letter and active_letter == row["letter"]:
+            await self._broadcast("state_update", self._build_state(db))
         return web.json_response({"ok": True})
 
     async def _admin_codename_pool_delete(self, request: web.Request) -> web.Response:
@@ -1693,8 +1802,19 @@ class VotingServer:
         if request.query.get("admin_password") != ADMIN_PASSWORD:
             return web.json_response({"error": "Unauthorized"}, status=401)
         row_id = int(request.match_info["id"])
+        pool_row = db.execute(
+            "SELECT letter, name FROM codename_candidates WHERE id = ?", (row_id,)
+        ).fetchone()
         db.execute("DELETE FROM codename_candidates WHERE id = ?", (row_id,))
+        active_letter = self._active_codename_letter(db)
+        if pool_row and active_letter and active_letter == pool_row["letter"]:
+            db.execute(
+                "DELETE FROM candidates WHERE LOWER(title) = ? AND author IS NULL",
+                (pool_row["name"],),
+            )
         db.commit()
+        if pool_row and active_letter and active_letter == pool_row["letter"]:
+            await self._broadcast("state_update", self._build_state(db))
         return web.json_response({"ok": True})
 
     async def _admin_import_voters(self, request: web.Request) -> web.Response:
